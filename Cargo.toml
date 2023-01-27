@@ -1,0 +1,33 @@
+[package]
+name = "deucalion"
+version = "0.1.0"
+authors = ["ff14wed"]
+edition = "2018"
+
+[lib]
+name = "deucalion"
+crate-type = ["dylib"]
+
+[dependencies]
+tokio = { version = "0.2", features = ["io-util", "sync", "rt-core", "rt-threaded", "blocking"] }
+tokio-util = { version = "0.2", features = ["codec"] }
+parity-tokio-ipc = "0.7"
+futures = "0.3"
+failure = "0.1.6"
+failure_derive = "0.1.6"
+bytes = "0.5"
+stream-cancel = "0.5"
+log = "0.4"
+simplelog = "^0.7.4"
+crossbeam-channel = "0.4"
+detour = "0.8.0"
+parking_lot = "0.10.0"
+pelite = "0.9"
+twoway = "0.2.1"
+region = "2.2.0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+  "minwindef", "minwinbase", "processthreadsapi", "winerror",
+  "winsock2", "libloaderapi", "consoleapi", "wincon"
+] }
