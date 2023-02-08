@@ -1,5 +1,6 @@
 use std::mem;
 use std::ptr;
+use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
 
@@ -27,8 +28,12 @@ static_detour! {
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
 
-    hook: OnceCell<
-        &'static detour::StaticDetour<unsafe extern "system" fn(*const u8, *const usize) -> usize>,
+    hook: Arc<
+        OnceCell<
+            &'static detour::StaticDetour<
+                unsafe extern "system" fn(*const u8, *const usize) -> usize,
+            >,
+        >,
     >,
     wg: waitgroup::WaitGroup,
 }
@@ -40,7 +45,7 @@ impl Hook {
     ) -> Result<Hook> {
         Ok(Hook {
             data_tx,
-            hook: OnceCell::new(),
+            hook: Arc::new(OnceCell::new()),
             wg,
         })
     }
