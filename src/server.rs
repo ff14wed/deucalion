@@ -1,11 +1,11 @@
 use parity_tokio_ipc::{Endpoint, SecurityAttributes};
 
-use tokio::stream::{Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use tokio::sync::{mpsc, Mutex};
-use tokio::{self, prelude::*};
 use tokio_util::codec::Framed;
 
 use futures::SinkExt;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -14,7 +14,7 @@ use std::task::{Context, Poll};
 
 use failure::{format_err, Error};
 
-use stream_cancel::{StreamExt as StreamCancelExt, Tripwire};
+use stream_cancel::Tripwire;
 
 use log::{error, info};
 
@@ -40,7 +40,7 @@ pub struct Shared {
 /// The state for each connected client.
 struct Peer<T>
 where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + std::marker::Unpin,
+    T: AsyncRead + AsyncWrite + std::marker::Unpin,
 {
     id: usize,
     /// The connection wrapped with the `PayloadCodec`.
@@ -72,7 +72,7 @@ impl Shared {
     }
 
     pub async fn shutdown(&self) {
-        let mut signal_tx = self.signal.clone();
+        let signal_tx = self.signal.clone();
         let _ = signal_tx.send(()).await;
     }
 
@@ -85,12 +85,12 @@ impl Shared {
 
 impl<T> Peer<T>
 where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + std::marker::Unpin,
+    T: AsyncRead + AsyncWrite + std::marker::Unpin,
 {
     async fn new(
         state: Arc<Mutex<Shared>>,
         frames: Framed<T, rpc::PayloadCodec>,
-    ) -> io::Result<Peer<T>> {
+    ) -> tokio::io::Result<Peer<T>> {
         let (tx, rx) = mpsc::unbounded_channel();
 
         // Add an entry for this `Peer` in the shared state map.
@@ -111,18 +111,17 @@ enum Message {
     Data(rpc::Payload),
 }
 
-// Peer implements `Stream` in a way that polls both the `Rx`, and `Framed` types.
-// A message is produced whenever an event is ready until the `Framed` stream returns `None`.
+/// Peer implements `Stream` in a way that polls both the `Rx`, and `Framed` types.
+/// A message is produced whenever an event is ready until the `Framed` stream returns `None`.
 impl<T> Stream for Peer<T>
 where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + std::marker::Unpin,
+    T: AsyncRead + AsyncWrite + std::marker::Unpin,
 {
     type Item = Result<Message, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // First poll the `UnboundedReceiver`.
-
-        if let Poll::Ready(Some(v)) = Pin::new(&mut self.rx).poll_next(cx) {
+        if let Poll::Ready(Some(v)) = Pin::new(&mut self.rx).poll_recv(cx) {
             return Poll::Ready(Some(Ok(Message::Data(v))));
         }
 
@@ -142,14 +141,48 @@ where
     }
 }
 
+/// Handle the client message and send a success/failure esponse back
+async fn handle_client_message<T, F>(
+    payload: rpc::Payload,
+    peer: &mut Peer<T>,
+    payload_handler: &F,
+) -> Result<(), Error>
+where
+    T: AsyncRead + AsyncWrite + std::marker::Unpin,
+    F: Fn(rpc::Payload) -> Result<(), Error>,
+{
+    let ctx = payload.ctx;
+    match payload_handler(payload) {
+        Ok(()) => {
+            peer.frames
+                .send(rpc::Payload {
+                    op: rpc::MessageOps::Debug,
+                    ctx: ctx,
+                    data: String::from("OK").into_bytes(),
+                })
+                .await?
+        }
+        Err(e) => {
+            peer.frames
+                .send(rpc::Payload {
+                    op: rpc::MessageOps::Debug,
+                    ctx: ctx,
+                    data: String::from(e.to_string()).into_bytes(),
+                })
+                .await?
+        }
+    }
+    Ok(())
+}
+
 /// Process an individual client
 async fn process<F>(
     state: Arc<Mutex<Shared>>,
-    stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + std::marker::Unpin,
+    stream: impl AsyncRead + AsyncWrite + std::marker::Unpin,
     payload_handler: F,
 ) -> Result<(), Error>
 where
-    F: Fn(rpc::Payload),
+    F: Fn(rpc::Payload) -> Result<(), Error>,
 {
     let codec = rpc::PayloadCodec::new();
 
@@ -191,9 +224,12 @@ where
                         state.shutdown().await;
                         return Ok(());
                     }
-                    _ => payload_handler(payload),
-                };
+                    _ => {
+                        handle_client_message(payload, &mut peer, &payload_handler).await?;
+                    }
+                }
             }
+
             // A message was received from the broadcast.
             Ok(Message::Data(payload)) => {
                 peer.frames.send(payload).await?;
@@ -224,25 +260,28 @@ pub async fn run<F>(
     payload_handler: F,
 ) -> Result<(), Error>
 where
-    F: Fn(rpc::Payload) + Send + Clone + 'static,
+    F: Fn(rpc::Payload) -> Result<(), Error> + Sync + Send + Clone + 'static,
 {
     let (trigger, tripwire) = Tripwire::new();
 
     let mut endpoint = Endpoint::new(pipe_name);
     endpoint.set_security_attributes(SecurityAttributes::allow_everyone_create()?);
 
-    let mut incoming = endpoint.incoming()?.take_until(tripwire);
+    let incoming = endpoint.incoming()?.take_until(tripwire);
+
+    futures::pin_mut!(incoming);
 
     tokio::spawn(async move {
-        let _ = signal_rx.next().await;
+        let _ = signal_rx.recv().await;
         info!("Shutdown signal received");
         trigger.cancel();
     });
 
+    // Create a new process loop task for each client
     while let Some(result) = incoming.next().await {
         match result {
             Ok(stream) => {
-                let state = Arc::clone(&state);
+                let state = state.clone();
                 let handler = payload_handler.clone();
                 tokio::spawn(async move {
                     if let Err(e) = process(state, stream, handler).await {

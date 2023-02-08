@@ -1,22 +1,18 @@
 use std::mem;
 use std::ptr;
 
-use parking_lot::RwLock;
-use std::sync::Arc;
+use once_cell::sync::OnceCell;
 
-use failure::Error;
+use failure::{format_err, Error};
 
-use crossbeam_channel as channel;
 use detour;
 use detour::static_detour;
+use tokio::sync::mpsc;
 
 use crate::hook::waitgroup;
 use crate::rpc;
 
-use pelite::pattern as pat;
-use pelite::pe64::PeView;
-
-use crate::procloader::{get_ffxiv_handle, sig_scan_helper};
+use crate::procloader::get_ffxiv_handle;
 
 use log::info;
 
@@ -24,51 +20,46 @@ static_detour! {
     static RecvZonePacket: unsafe extern "system" fn(*const u8, *const usize) -> usize;
 }
 
-const RECVZONEPACKET_SIG: &[pat::Atom] = pat!("E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?");
+// const RECVZONEPACKET_SIG: &[pat::Atom] = pat!("E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?");
 
 #[derive(Clone)]
 pub struct Hook {
-    call_home_tx: channel::Sender<rpc::Payload>,
+    data_tx: mpsc::UnboundedSender<rpc::Payload>,
 
-    hook: Arc<
-        RwLock<
-            &'static detour::StaticDetour<
-                unsafe extern "system" fn(*const u8, *const usize) -> usize,
-            >,
-        >,
+    hook: OnceCell<
+        &'static detour::StaticDetour<unsafe extern "system" fn(*const u8, *const usize) -> usize>,
     >,
     wg: waitgroup::WaitGroup,
 }
 
 impl Hook {
     pub fn new(
-        call_home_tx: channel::Sender<rpc::Payload>,
+        data_tx: mpsc::UnboundedSender<rpc::Payload>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook, Error> {
-        let handle_ffxiv = get_ffxiv_handle()?;
-        let pe_view = unsafe { PeView::module(handle_ffxiv) };
-        let rzp_offset = sig_scan_helper("RecvZonePacket", RECVZONEPACKET_SIG, pe_view, 1)?;
-        let ptr_rzp = handle_ffxiv.wrapping_offset(rzp_offset);
-
-        let hook = unsafe {
-            let rzp: unsafe extern "system" fn(*const u8, *const usize) -> usize =
-                mem::transmute(ptr_rzp as *const ());
-            RecvZonePacket.initialize(rzp, |_, _| 0)?
-        };
         Ok(Hook {
-            call_home_tx: call_home_tx,
+            data_tx: data_tx,
 
-            hook: Arc::new(RwLock::new(hook)),
+            hook: OnceCell::new(),
             wg: wg,
         })
     }
 
-    pub fn setup(&self) -> Result<(), Error> {
+    pub fn setup(&self, recvzonepacket_rva: isize) -> Result<(), Error> {
+        let ptr_rzp = get_ffxiv_handle()?.wrapping_offset(recvzonepacket_rva);
+
+        let self_clone = self.clone();
+
+        let hook = unsafe {
+            let rzp: unsafe extern "system" fn(*const u8, *const usize) -> usize =
+                mem::transmute(ptr_rzp as *const ());
+            RecvZonePacket.initialize(rzp, move |a, b| self_clone.recv_zone_packet(a, b))?
+        };
+        self.hook
+            .set(hook)
+            .map_err(|_| format_err!("Failed to set up the hook."))?;
         unsafe {
-            let self_clone = self.clone();
-            let hook = self.hook.write();
-            hook.set_detour(move |a, b| self_clone.recv_zone_packet(a, b));
-            hook.enable()?;
+            self.hook.get_unchecked().enable()?;
         }
         Ok(())
     }
@@ -76,7 +67,11 @@ impl Hook {
     unsafe fn recv_zone_packet(&self, this: *const u8, a2: *const usize) -> usize {
         let _guard = self.wg.add();
 
-        let ret = self.hook.read().call(this, a2);
+        let ret = self
+            .hook
+            .get()
+            .expect("Hook function was called without a valid hook")
+            .call(this, a2);
 
         let ptr_received_packet: *const u8 = *(a2.add(2)) as *const u8;
 
@@ -105,7 +100,7 @@ impl Hook {
         dst[4..8].clone_from_slice(&target_actor_id.to_le_bytes());
         ptr::copy(ptr_data, dst[8..].as_mut_ptr(), data_len as usize);
 
-        let _ = self.call_home_tx.send(rpc::Payload {
+        let _ = self.data_tx.send(rpc::Payload {
             op: rpc::MessageOps::Recv,
             ctx: 0,
             data: dst,
@@ -115,7 +110,9 @@ impl Hook {
 
     pub fn shutdown(&self) {
         unsafe {
-            let _ = self.hook.write().disable();
+            if let Some(hook) = self.hook.get() {
+                let _ = hook.disable();
+            };
         }
     }
 }

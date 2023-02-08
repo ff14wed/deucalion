@@ -9,8 +9,8 @@ use failure::{format_err, Error};
 use failure_derive::Fail;
 
 use pelite::pattern as pat;
-use pelite::pe64::image::{Rva, Va};
-use pelite::pe64::Pe;
+use pelite::pe::image::{Rva, Va};
+use pelite::pe::Pe;
 use std::mem;
 
 use std::convert::TryInto;

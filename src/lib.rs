@@ -1,9 +1,6 @@
 use std::io::{self, Read};
 use std::panic;
 
-use channel::select;
-use crossbeam_channel as channel;
-
 #[cfg(windows)]
 use winapi::shared::minwindef::*;
 use winapi::um::libloaderapi;
@@ -15,13 +12,12 @@ use winapi::um::consoleapi;
 #[cfg(debug_assertions)]
 use winapi::um::wincon;
 
-use failure::{Error, ResultExt};
+use failure::{format_err, Error, ResultExt};
 
 use std::sync::Arc;
-use std::thread;
 
-use tokio::runtime;
-use tokio::sync::{mpsc, Mutex};
+use tokio::select;
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 mod hook;
 mod procloader;
@@ -31,64 +27,70 @@ mod server;
 use log::{debug, error, info};
 use simplelog::{self, LevelFilter, SimpleLogger};
 
-fn handle_payload(payload: rpc::Payload) {
+fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<(), Error> {
     debug!("Received payload: {:?}", payload);
     match payload.op {
         rpc::MessageOps::Debug => {
             debug!("{:?}", payload);
         }
+        rpc::MessageOps::Recv => {
+            if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data) {
+                let err = format_err!("Error setting up hook: {:?}", e);
+                debug!("{:?}", err);
+                return Err(err);
+            }
+        }
         _ => {}
     };
+    Ok(())
 }
 
-fn main_with_result() -> Result<(), Error> {
-    let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
-    let pipe_name = format!(r"\\.\pipe\deucalion-{}", pid as u32);
+fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<(), Error> {
+    let sig_str = String::from_utf8(data)?;
+    hs.initialize_recv_hook(sig_str)
+}
+
+#[tokio::main]
+async fn main_with_result() -> Result<(), Error> {
+    let hs = Arc::new(hook::State::new().context("Error setting up the hook")?);
+    let hs_clone = hs.clone();
 
     let (signal_tx, signal_rx) = mpsc::channel(1);
     let state = Arc::new(Mutex::new(server::Shared::new(signal_tx)));
-    let mut rt = runtime::Runtime::new()?;
+    let state_clone = state.clone();
 
-    let msg_loop_state = state.clone();
-
-    info!("Installing hook...");
-    let hs = hook::State::new().context("Error setting up the hook")?;
-    info!("Installed hook");
-
-    let (shutdown_tx, shutdown_rx) = channel::bounded::<()>(0);
-    let msg_thread_handle = thread::spawn(move || {
-        match runtime::Builder::new().basic_scheduler().build() {
-            Ok(mut msg_loop_rt) => msg_loop_rt.block_on(async {
-                loop {
-                    select! {
-                        recv(hs.broadcast_rx) -> res => {
-                            if let Ok(payload) = res {
-                                msg_loop_state.lock().await.broadcast(payload).await;
-                            }
-                        },
-                        recv(shutdown_rx) -> _ => {
-                            hs.shutdown();
-                            return ();
-                        }
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+    let msg_loop_future = tokio::spawn(async move {
+        loop {
+            let mut broadcast_rx = hs.broadcast_rx.lock().await;
+            select! {
+                res = broadcast_rx.recv() => {
+                    if let Some(payload) = res {
+                        state_clone.lock().await.broadcast(payload).await;
                     }
+                },
+                _ = &mut shutdown_rx => {
+                    hs.shutdown();
+                    return ();
                 }
-            }),
-            Err(e) => error!("Error spawning tokio runtime: {:?}", e),
-        };
-        ()
+            }
+        }
     });
 
-    rt.block_on(server::run(
-        pipe_name,
-        state,
-        signal_rx,
-        move |payload: rpc::Payload| {
-            handle_payload(payload);
-        },
-    ))?;
+    let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
+    let pipe_name = format!(r"\\.\pipe\deucalion-{}", pid as u32);
 
+    if let Err(e) = server::run(pipe_name, state, signal_rx, move |payload: rpc::Payload| {
+        handle_payload(payload, hs_clone.clone())
+    })
+    .await
+    {
+        error!("Server encountered error running: {:?}", e)
+    }
+
+    // Signal the msg loop to exit and shut down the hook
     drop(shutdown_tx);
-    msg_thread_handle.join().unwrap();
+    msg_loop_future.await?;
 
     info!("Hook shutdown initiated...");
     info!("Shut down!");

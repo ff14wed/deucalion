@@ -79,8 +79,7 @@ impl Decoder for PayloadCodec {
     }
 }
 
-impl Encoder for PayloadCodec {
-    type Item = Payload;
+impl Encoder<Payload> for PayloadCodec {
     type Error = io::Error;
 
     fn encode(&mut self, data: Payload, mut dst: &mut BytesMut) -> Result<(), io::Error> {
