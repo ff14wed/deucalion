@@ -22,7 +22,7 @@ simplelog = "0.12"
 detour = { git = "https://github.com/Hpmason/detour-rs", branch = "fix-nightly1.67.0-changes" }
 parking_lot = "0.12.1"
 pelite = "0.10"
-twoway = "0.2.2"
+memchr = "2.5"
 region = "3.0"
 once_cell = "1.17"
 

@@ -1,4 +1,7 @@
+use std::convert::TryInto;
+use std::mem;
 use std::ptr;
+
 use winapi::shared::minwindef;
 use winapi::um::libloaderapi;
 
@@ -11,9 +14,8 @@ use thiserror::Error;
 use pelite::pattern as pat;
 use pelite::pe::image::{Rva, Va};
 use pelite::pe::Pe;
-use std::mem;
 
-use std::convert::TryInto;
+use memchr::memmem;
 
 use log::debug;
 
@@ -133,8 +135,10 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
         "Using pat len {:?} and excerpt {:x?} with rva {:?}",
         pat_len, excerpt, excerpt_rva,
     );
+    let finder = memmem::Finder::new(excerpt.as_slice());
+
     while start < end {
-        match twoway::find_bytes(&image[start..end], excerpt.as_slice()) {
+        match finder.find(&image[start..end]) {
             Some(loc) => {
                 let pattern_start = loc + start - excerpt_rva;
                 let pattern_start_rva = pattern_start as u32;
