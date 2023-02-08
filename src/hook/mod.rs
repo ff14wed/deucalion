@@ -1,13 +1,12 @@
+use std::sync::Arc;
+
 use anyhow::{format_err, Context, Result};
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::procloader::{get_ffxiv_handle, sig_scan_helper};
 use pelite::pattern;
 use pelite::pe::PeView;
-
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use crate::rpc;
 

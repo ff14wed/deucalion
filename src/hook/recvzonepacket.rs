@@ -2,13 +2,14 @@ use std::mem;
 use std::ptr;
 use std::sync::Arc;
 
-use once_cell::sync::OnceCell;
-
 use anyhow::{format_err, Result};
+
+use tokio::sync::mpsc;
+
+use once_cell::sync::OnceCell;
 
 use detour;
 use detour::static_detour;
-use tokio::sync::mpsc;
 
 use crate::hook::waitgroup;
 use crate::rpc;

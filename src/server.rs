@@ -1,18 +1,17 @@
-use parity_tokio_ipc::{Endpoint, SecurityAttributes};
-
-use futures::{Stream, StreamExt};
-use tokio::sync::{mpsc, Mutex};
-use tokio_util::codec::Framed;
-
-use futures::SinkExt;
-use tokio::io::{AsyncRead, AsyncWrite};
-
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::{format_err, Error, Result};
+
+use futures::{SinkExt, Stream, StreamExt};
+
+use parity_tokio_ipc::{Endpoint, SecurityAttributes};
+use tokio::sync::{mpsc, Mutex};
+use tokio_util::codec::Framed;
+
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use stream_cancel::Tripwire;
 

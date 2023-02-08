@@ -12,9 +12,9 @@ use winapi::um::consoleapi;
 #[cfg(debug_assertions)]
 use winapi::um::wincon;
 
-use anyhow::{format_err, Context, Result};
-
 use std::sync::Arc;
+
+use anyhow::{format_err, Context, Result};
 
 use tokio::select;
 use tokio::sync::{mpsc, oneshot, Mutex};
