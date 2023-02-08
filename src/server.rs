@@ -60,7 +60,7 @@ impl Shared {
         Shared {
             peers: HashMap::new(),
             counter: 0,
-            signal: signal,
+            signal,
         }
     }
 
@@ -156,7 +156,7 @@ where
             peer.frames
                 .send(rpc::Payload {
                     op: rpc::MessageOps::Debug,
-                    ctx: ctx,
+                    ctx,
                     data: String::from("OK").into_bytes(),
                 })
                 .await?
@@ -165,7 +165,7 @@ where
             peer.frames
                 .send(rpc::Payload {
                     op: rpc::MessageOps::Debug,
-                    ctx: ctx,
+                    ctx,
                     data: String::from(e.to_string()).into_bytes(),
                 })
                 .await?
