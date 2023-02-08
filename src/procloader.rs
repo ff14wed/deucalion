@@ -5,8 +5,8 @@ use winapi::um::libloaderapi;
 use std::ffi::{CString, OsStr};
 use std::os::windows::ffi::OsStrExt;
 
-use failure::{format_err, Error};
-use failure_derive::Fail;
+use anyhow::Result;
+use thiserror::Error;
 
 use pelite::pattern as pat;
 use pelite::pe::image::{Rva, Va};
@@ -17,20 +17,28 @@ use std::convert::TryInto;
 
 use log::debug;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 enum ProcLoaderError {
-    #[fail(display = "cannot find load address for module: {}", name)]
+    #[error("cannot find load address for module: {}", name)]
     ModuleNotFound { name: &'static str },
-    #[fail(display = "cannot load address for proc: {}", name)]
+    #[error("cannot load address for proc: {}", name)]
     ProcNotFound { name: &'static str },
-    #[fail(display = "Signature has no predetermined match length.")]
+    #[error("Signature has no predetermined match length.")]
     BadSignature {},
-    #[fail(display = "Could not get virtual function: {} is null", name)]
+    #[error("Could not get virtual function: {} is null", name)]
     NullPtr { name: &'static str },
 }
 
+#[derive(Debug, Error)]
+enum SigScanError {
+    #[error("Could not find a signature match for {}", name)]
+    MatchNotFound { name: &'static str },
+    #[error("Invalid signature match for {}", name)]
+    InvalidMatch { name: &'static str },
+}
+
 #[allow(dead_code)]
-pub fn get_module_handle(mod_name: &'static str) -> Result<minwindef::HMODULE, Error> {
+pub fn get_module_handle(mod_name: &'static str) -> Result<minwindef::HMODULE> {
     let str_mod = OsStr::new(mod_name)
         .encode_wide()
         .chain(Some(0).into_iter())
@@ -48,7 +56,7 @@ pub fn get_module_handle(mod_name: &'static str) -> Result<minwindef::HMODULE, E
 pub fn get_address(
     lib_handle: minwindef::HMODULE,
     fn_name: &'static str,
-) -> Result<minwindef::FARPROC, Error> {
+) -> Result<minwindef::FARPROC> {
     let cstr_fn_name = CString::new(fn_name).unwrap();
     unsafe {
         let ptr_fn = libloaderapi::GetProcAddress(lib_handle, cstr_fn_name.as_ptr() as *const i8);
@@ -59,7 +67,7 @@ pub fn get_address(
     }
 }
 
-pub fn get_ffxiv_handle() -> Result<*const u8, Error> {
+pub fn get_ffxiv_handle() -> Result<*const u8> {
     unsafe {
         let handle_ffxiv = libloaderapi::GetModuleHandleW(ptr::null()) as *const u8;
         if handle_ffxiv.is_null() {
@@ -74,7 +82,7 @@ pub fn get_virtual_function_ptr(
     vtable_addr: *const u8,
     vtable_offset: isize,
     count: isize,
-) -> Result<*const u8, Error> {
+) -> Result<*const u8> {
     unsafe {
         if vtable_addr.is_null() {
             return Err(ProcLoaderError::NullPtr {
@@ -112,30 +120,30 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
     pat: &[pat::Atom],
     pe: P,
     save: &mut [Rva],
-) -> Result<bool, Error> {
+) -> Result<bool> {
     let pat_len = get_pat_len(pat)?;
-    let (excerpt, excerpt_offset) = get_excerpt(pat);
+    let (excerpt, excerpt_rva) = get_excerpt(pat);
     let image_range = pe.headers().code_range();
     let image = pe.image();
     let pattern_scanner = pe.scanner();
 
-    let mut start = image_range.start as usize + excerpt_offset;
+    let mut start = image_range.start as usize + excerpt_rva;
     let end = image_range.end as usize;
     debug!(
-        "Using pat len {:?} and excerpt {:x?} with offset {:?}",
-        pat_len, excerpt, excerpt_offset,
+        "Using pat len {:?} and excerpt {:x?} with rva {:?}",
+        pat_len, excerpt, excerpt_rva,
     );
     while start < end {
         match twoway::find_bytes(&image[start..end], excerpt.as_slice()) {
             Some(loc) => {
-                let pattern_start = loc + start - excerpt_offset;
+                let pattern_start = loc + start - excerpt_rva;
                 let pattern_start_rva = pattern_start as u32;
                 if pattern_scanner.finds(pat, pattern_start_rva..pattern_start_rva + pat_len, save)
                 {
                     return Ok(true);
                 }
                 // If pattern not found, continue
-                start = pattern_start as usize + excerpt_offset as usize + excerpt.len();
+                start = pattern_start as usize + excerpt_rva as usize + excerpt.len();
             }
             None => return Ok(false),
         }
@@ -144,27 +152,39 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
 }
 
 pub fn sig_scan_helper<'a, P: Pe<'a>>(
-    name: &str,
+    name: &'static str,
     pat: &[pat::Atom],
     pe: P,
     depth: usize,
-) -> Result<isize, Error> {
+) -> Result<isize> {
     let mut save = [0; 8];
 
     let res = fast_pattern_scan(pat, pe, &mut save)?;
     if !res {
-        return Err(format_err!("Could not find signature for {}", name));
-    }
-    if save[depth] == 0 {
-        return Err(format_err!("Invalid sig match for {}: {:x?}", name, save));
+        return Err(SigScanError::MatchNotFound { name }.into());
     }
 
-    let offset: isize = save[depth].try_into()?;
-    debug!("Found {} offset: {:x?}", name, offset);
-    Ok(offset)
+    let mut deepest = 0;
+    if depth >= 8 {
+        for i in 0..8 {
+            if save[i] > 0 {
+                deepest = i
+            }
+        }
+    } else {
+        deepest = depth;
+    }
+
+    if save[deepest] == 0 {
+        return Err(SigScanError::InvalidMatch { name }.into());
+    }
+
+    let rva: isize = save[deepest].try_into()?;
+    debug!("Found {} rva: {:x?}", name, rva);
+    Ok(rva)
 }
 
-fn get_pat_len(pat: &[pat::Atom]) -> Result<u32, Error> {
+fn get_pat_len(pat: &[pat::Atom]) -> Result<u32> {
     let mut idx = 0;
 
     let mut len: u32 = 0;

@@ -3,7 +3,7 @@ use std::ptr;
 
 use once_cell::sync::OnceCell;
 
-use failure::{format_err, Error};
+use anyhow::{format_err, Result};
 
 use detour;
 use detour::static_detour;
@@ -20,6 +20,7 @@ static_detour! {
     static RecvZonePacket: unsafe extern "system" fn(*const u8, *const usize) -> usize;
 }
 
+// Sig for global dx11 version
 // const RECVZONEPACKET_SIG: &[pat::Atom] = pat!("E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?");
 
 #[derive(Clone)]
@@ -36,16 +37,15 @@ impl Hook {
     pub fn new(
         data_tx: mpsc::UnboundedSender<rpc::Payload>,
         wg: waitgroup::WaitGroup,
-    ) -> Result<Hook, Error> {
+    ) -> Result<Hook> {
         Ok(Hook {
-            data_tx: data_tx,
-
+            data_tx,
             hook: OnceCell::new(),
-            wg: wg,
+            wg,
         })
     }
 
-    pub fn setup(&self, recvzonepacket_rva: isize) -> Result<(), Error> {
+    pub fn setup(&self, recvzonepacket_rva: isize) -> Result<()> {
         let ptr_rzp = get_ffxiv_handle()?.wrapping_offset(recvzonepacket_rva);
 
         let self_clone = self.clone();
@@ -58,6 +58,7 @@ impl Hook {
         self.hook
             .set(hook)
             .map_err(|_| format_err!("Failed to set up the hook."))?;
+
         unsafe {
             self.hook.get_unchecked().enable()?;
         }

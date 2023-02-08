@@ -12,7 +12,7 @@ use winapi::um::consoleapi;
 #[cfg(debug_assertions)]
 use winapi::um::wincon;
 
-use failure::{format_err, Error, ResultExt};
+use anyhow::{format_err, Context, Result};
 
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ mod server;
 use log::{debug, error, info};
 use simplelog::{self, LevelFilter, SimpleLogger};
 
-fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<(), Error> {
+fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     debug!("Received payload: {:?}", payload);
     match payload.op {
         rpc::MessageOps::Debug => {
@@ -45,13 +45,13 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<(), Err
     Ok(())
 }
 
-fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<(), Error> {
-    let sig_str = String::from_utf8(data)?;
+fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
+    let sig_str = String::from_utf8(data).context("Invalid string")?;
     hs.initialize_recv_hook(sig_str)
 }
 
 #[tokio::main]
-async fn main_with_result() -> Result<(), Error> {
+async fn main_with_result() -> Result<()> {
     let hs = Arc::new(hook::State::new().context("Error setting up the hook")?);
     let hs_clone = hs.clone();
 

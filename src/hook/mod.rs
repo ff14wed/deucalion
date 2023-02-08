@@ -1,4 +1,5 @@
-use failure::Error;
+use anyhow::{format_err, Context, Result};
+
 use tokio::sync::mpsc;
 
 use crate::procloader::{get_ffxiv_handle, sig_scan_helper};
@@ -20,7 +21,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new() -> Result<State, Error> {
+    pub fn new() -> Result<State> {
         let (broadcast_tx, broadcast_rx) = mpsc::unbounded_channel::<rpc::Payload>();
 
         let wg = waitgroup::WaitGroup::new();
@@ -32,12 +33,15 @@ impl State {
         Ok(hs)
     }
 
-    pub fn initialize_recv_hook(&self, sig_str: String) -> Result<(), Error> {
-        let pat = pattern::parse(&sig_str)?;
+    pub fn initialize_recv_hook(&self, sig_str: String) -> Result<()> {
+        let pat =
+            pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
         let sig: &[pattern::Atom] = &pat;
         let handle_ffxiv = get_ffxiv_handle()?;
         let pe_view = unsafe { PeView::module(handle_ffxiv) };
-        let recvzonepacket_rva = sig_scan_helper("RecvZonePacket", sig, pe_view, 1)?;
+
+        let recvzonepacket_rva = sig_scan_helper("RecvZonePacket", sig, pe_view, 8)
+            .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
         self.rzp_hook.setup(recvzonepacket_rva)
     }

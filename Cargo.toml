@@ -13,8 +13,8 @@ tokio = { version = "1.25.0", features = ["io-util", "sync", "rt", "rt-multi-thr
 tokio-util = { version = "0.7.4", features = ["codec", "compat"] }
 parity-tokio-ipc = "0.9"
 futures = "0.3"
-failure = "0.1.8"
-failure_derive = "0.1.8"
+anyhow = "1.0"
+thiserror = "1.0"
 bytes = "1.4.0"
 stream-cancel = "0.8.1"
 log = "0.4"

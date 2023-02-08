@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use failure::{format_err, Error};
+use anyhow::{format_err, Error, Result};
 
 use stream_cancel::Tripwire;
 
