@@ -192,7 +192,7 @@ where
             rpc::Payload {
                 op: rpc::MessageOps::Debug,
                 ctx: 0,
-                data: String::from("Hook initialized.").into_bytes(),
+                data: String::from("SERVER HELLO").into_bytes(),
             }
             .into(),
         )
