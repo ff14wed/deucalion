@@ -74,11 +74,11 @@ is treated as a request ID.
 When broadcasted from the hook server, the CHANNEL denotes one of these three
 packet types:
 
-| CHANNEL | Name  | Description                           |
-| ------- | ----- | ------------------------------------- |
-| 0       | Lobby | Unused                                |
-| 1       | Zone  | Packets coming from the Zone channel. |
-| 2       | Chat  | Packets coming from the Chat channel. |
+| CHANNEL | Name  | Description                                                   |
+| ------- | ----- | ------------------------------------------------------------- |
+| 0       | Lobby | Unused                                                        |
+| 1       | Zone  | Packets coming from the Zone channel.                         |
+| 2       | Chat  | Packets coming from the Chat channel. Currently unimplemented |
 
 
 ### Data
