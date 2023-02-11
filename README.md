@@ -24,7 +24,7 @@ with other packet handling applications.
 3. `cd` into `deucalion` and run `cargo build`. The DLL will be located in
   `target/debug/deucalion.dll`.
 
-## Usage
+## Basic Usage
 
 On initialization, Deucalion exposes a
 [Named Pipe](https://docs.microsoft.com/en-us/windows/win32/ipc/named-pipes)
@@ -41,8 +41,7 @@ subscriber requests.
   signature for `RecvZonePacket` in the DATA field. If signature is accepted,
   then Deucalion will reply with an `OK` response. Please see [Subscriber
   Protocol](#subscriber-protocol) for more info.
-1. Deucalion will begin logging all calls to the FFXIV packet handler through
-  the pipe.
+1. Deucalion will begin broadcasting received Zone packets to all subscribers.
 
 ## Payload Format
 
@@ -120,6 +119,11 @@ For updating signatures, please see
 https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html for more information
 on the format.
 
+> :warning: Once the Recv hook is initialized, all subscribers will receive the
+> packet stream regardless of whether or not their own initialization succeeded.
+> As such, it is wise to begin handling data as soon as the named pipe
+> connection is established and handle initialization asynchronously.
+
 #### Error Handling
 
 Deucalion will gracefully handle error cases by responding with a `Debug`-OP
@@ -138,7 +142,7 @@ Here is an example interaction between Deucalion and a subscriber:
 Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO" }
 // Subscriber: Request with an invalid sig.
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"invalid sig" }
-// Deucalion: Response with an invalid sig.
+// Deucalion: Response with an invalid sig error.
 Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Invalid signature: \"invalid sig\"..." }
 // Subscriber: Request with a valid sig. Note that it is still possible to
 //             attempt to set up the hook again after an error like an invalid
@@ -146,9 +150,28 @@ Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Invalid sign
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"E8 $ { ' } ..." }
 // Deucalion: OK response
 Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"OK" }
-// Deucalion: Data streamed from hook
+// Deucalion: Data streamed to all subscribers
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ```
+
+#### Example with a second subscriber
+
+If the Recv hook is already initialized, then the following scenario can happen:
+```c
+// Deucalion: Connection established message.
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO" }
+// Deucalion: Data streamed to all subscribers
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
+
+// Subscriber: Asynchronous task sending request with an valid sig.
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"E8 $ { ' } ..." }
+// Deucalion: Response with already initialized error.
+Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Detour is already initialized" }
+
+// Deucalion: Data streamed to all subscribers
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment2 }
+```
+
 
 ## FFXIV Packet Data Format
 
