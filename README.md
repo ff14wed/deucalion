@@ -8,9 +8,11 @@ with other packet handling applications.
 
   - This library can be used as a sniffer on the FFXIV packet protocol layer
     without concern for the lower-level TCP layer.
-  - This method of capture is not susceptible to the limitations of
-    libpcap-based capture.
-  - The hook server supports multiple client connections at once.
+  - Deucalion runs as an injected DLL and hooks the function responsible for
+    reading decoded packets. Therefore, this method of capture is not susceptible
+    to the limitations of libpcap-based capture.
+  - Deucalion functions as a broadcast server that streams captured packets to
+    one or many subscribers.
 
 ## Building
 
@@ -24,21 +26,22 @@ with other packet handling applications.
 
 ## Usage
 
-This hook runs as part of a server which exposes a very basic
+On initialization, Deucalion exposes a
 [Named Pipe](https://docs.microsoft.com/en-us/windows/win32/ipc/named-pipes)
-protocol for reading and writing packets.
+server that follows a length-delimited protocol for capturing packets or for
+subscriber requests.
 
 1. Inject `deucalion.dll` into `ffxiv_dx11.exe` with any method you choose. If
    built in debug mode, a console window will appear after attaching.
-1. Initiate a Named pipe session with the hook by connecting to
+1. Initiate a Named pipe session with Deucalion by connecting to
   `\\.\pipe\deucalion-{FFXIV PID}`. For example, if the PID of a running
   FFXIV process is 9000, then the name of the pipe is
   `\\.\pipe\deucalion-9000`.
-  1. Send a `Recv`-OP Payload request to the hook server with the function
+  1. Send a `Recv`-OP Payload request to Deucalion with the function
   signature for `RecvZonePacket` in the DATA field. If signature is accepted,
-  then the server will reply with an `OK` response. Please see [Client-to-Server
-  Protocol](#client-to-server-protocol) for more info.
-1. The hook will begin logging all calls to the FFXIV packet handler through
+  then Deucalion will reply with an `OK` response. Please see [Subscriber
+  Protocol](#subscriber-protocol) for more info.
+1. Deucalion will begin logging all calls to the FFXIV packet handler through
   the pipe.
 
 ## Payload Format
@@ -56,23 +59,23 @@ This is the total length of the entire payload, including the length bytes.
 
 ### OP Types
 
-| OP  | Name  | Description                                                                                                                             |
-| --- | ----- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | Debug | Used for passing debug text messages.                                                                                                   |
-| 1   | Ping  | Used to maintain a connection between client and the hook server. The hook will echo a "pong" with the same op when it receives a ping. |
-| 2   | Exit  | Used to signal the hook to unload itself from the host process.                                                                         |
-| 3   | Recv  | When sent from the hook, contains the FFXIV packet received by the host process.                                                        |
+| OP  | Name  | Description                                                                                                                       |
+| --- | ----- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Debug | Used for passing debug text messages.                                                                                             |
+| 1   | Ping  | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
+| 2   | Exit  | Used to signal Deucalion to unload itself from the host process.                                                                  |
+| 3   | Recv  | When sent from Deucalion, contains the FFXIV packet received by the host process.                                                 |
 
 ### Channel
 
 This is an identifier for the channel used for the payload. It is used to
-distinguish between streams of data. When set from the client, the CHANNEL
+distinguish between streams of data. When set from the subscriber, the CHANNEL
 is treated as a request ID.
 
 #### Recv OP
 
-When broadcasted from the hook server, the CHANNEL denotes one of these three
-packet types:
+When broadcasted from Deucalion, the CHANNEL denotes one of these three packet
+types:
 
 | CHANNEL | Name  | Description                                                   |
 | ------- | ----- | ------------------------------------------------------------- |
@@ -87,29 +90,31 @@ For payloads with OP `Debug`, the payload is simply debug-logged.
 
 For payloads with OP `Recv`, the data is the FFXIV packet sent by the host
 process. The packets are already in the correct order, but they still need to be
-decoded by the client. See [FFXIV Packet Data Format](#ffxiv-packet-data-format)
-for more information on how to handle this data.
+decoded by your application. See [FFXIV Packet Data
+Format](#ffxiv-packet-data-format) for more information on how to handle this
+data.
 
-## Client-to-Server Protocol
+## Subscriber Protocol
 
-The named pipe server is capable of receiving and handling requests from the
-client. The CHANNEL field is used to send the request ID, and the server will
-reply to the requesting client with a `Debug`-OP payload with the same request
-ID sent in the CHANNEL field.
+The Deucalion server is capable of receiving and handling requests from the
+subscriber. The CHANNEL field is used to send the request ID, and Deucalion
+will reply to the requesting subscriber with a `Debug`-OP payload with the same
+request ID sent in the CHANNEL field.
 
 ### Debug OP
 
 Any payload sent with the `Debug` OP will be simply be debug-logged and an `OK`
-response will be sent back to the requesting client.
+response will be sent back to the requesting subscriber.
 
 ### Ping OP
 
-The server will respond back with the same payload.
+Any `Ping`-OP payload sent to Deucalion will be echoed back to the requesting
+subscriber.
 
 ### Exit OP
 
-The server will immediately begin unloading the hook and cleaning itself from
-the host process without sending a response back to the client.
+Deucalion will immediately begin unloading all hooks and cleaning itself from
+the host process without sending a response back to the subscriber.
 
 ### Recv OP
 
@@ -122,7 +127,7 @@ As of 6.31, this signature is
 target. Please see https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html
 for more information on the signature format.
 
-The server will gracefully handle error cases by responding with a `Debug`-OP
+Deucalion will gracefully handle error cases by responding with a `Debug`-OP
 Payload with the request ID and error message as the data. The error cases that
 are handled include but are not limited to:
   - DATA could not be decoded as a string.
@@ -130,25 +135,28 @@ are handled include but are not limited to:
   - The signature could not be found in memory.
   - The `RecvZonePacket` hook was already initialized.
 
-Here is an example interaction between the server and client:
+Here is an example interaction between Deucalion and a subscriber:
 
 ```c
-// Server: Connection established message.
+// Deucalion: Connection established message.
 Payload { OP: OP.Debug, CHANNEL: 0, DATA: u8"SERVER HELLO" }
-// Client: Request with an invalid sig.
+// Subscriber: Request with an invalid sig.
 Payload { OP: OP.Recv, CHANNEL: 123, DATA: u8"invalid sig" }
-// Server: Response with an invalid sig.
+// Deucalion: Response with an invalid sig.
 Payload { OP: OP.Debug, CHANNEL: 123, DATA: u8"Error setting up hook: Invalid signature: \"invalid sig\"..." }
-// Client: Request with a valid sig. Note that it is still possible to attempt
-//         to set up the hook again after an error like an invalid sig.
+// Subscriber: Request with a valid sig. Note that it is still possible to
+//             attempt to set up the hook again after an error like an invalid
+//             sig.
 Payload { OP: OP.Recv, CHANNEL: 124, DATA: u8"E8 $ { ' } ..." }
+// Deucalion: OK response
 Payload { OP: OP.Debug, CHANNEL: 124, DATA: u8"OK" }
+// Deucalion: Data streamed from hook
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: "(Insert block data here)" }
 ```
 
 ## FFXIV Packet Data Format
 
-Data broadcasted with the `Recv` OP is sent to the client in a
+Data broadcasted with the `Recv` OP is sent to all subscribers in a
 Deucalion-specific format:
 
 ```c
