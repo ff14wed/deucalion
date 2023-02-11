@@ -32,7 +32,7 @@ impl State {
         Ok(hs)
     }
 
-    pub fn initialize_recv_hook(&self, sig_str: String) -> Result<()> {
+    pub fn initialize_recv_zone_hook(&self, sig_str: String) -> Result<()> {
         let pat =
             pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
         let sig: &[pattern::Atom] = &pat;

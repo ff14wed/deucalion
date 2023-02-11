@@ -22,9 +22,6 @@ static_detour! {
     static RecvZonePacket: unsafe extern "system" fn(*const u8, *const usize) -> usize;
 }
 
-// Sig for global dx11 version
-// const RECVZONEPACKET_SIG: &[pat::Atom] = pat!("E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?");
-
 #[derive(Clone)]
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,

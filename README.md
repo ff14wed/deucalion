@@ -69,20 +69,7 @@ This is the total length of the entire payload, including the length bytes.
 ### Channel
 
 This is an identifier for the channel used for the payload. It is used to
-distinguish between streams of data. When set from the subscriber, the CHANNEL
-is treated as a request ID.
-
-#### Recv OP
-
-When broadcasted from Deucalion, the CHANNEL denotes one of these three packet
-types:
-
-| CHANNEL | Name  | Description                                                   |
-| ------- | ----- | ------------------------------------------------------------- |
-| 0       | Lobby | Unused                                                        |
-| 1       | Zone  | Packets coming from the Zone channel.                         |
-| 2       | Chat  | Packets coming from the Chat channel. Currently unimplemented |
-
+distinguish between streams of data (e.g., Zone packets vs Chat packets).
 
 ### Data
 
@@ -97,9 +84,9 @@ data.
 ## Subscriber Protocol
 
 The Deucalion server is capable of receiving and handling requests from the
-subscriber. The CHANNEL field is used to send the request ID, and Deucalion
+subscriber. The CHANNEL field is used to send request context, and Deucalion
 will reply to the requesting subscriber with a `Debug`-OP payload with the same
-request ID sent in the CHANNEL field.
+CHANNEL.
 
 ### Debug OP
 
@@ -119,39 +106,48 @@ the host process without sending a response back to the subscriber.
 ### Recv OP
 
 Payloads sent with the `Recv` OP will be handled as a Recv-hook initialization
-request, where the DATA is a UTF-8-encoded string containing the function
-signature for `RecvZonePacket`.
+request, where CHANNEL denotes one of the connection channels listed below and
+DATA is a UTF-8-encoded string containing the function signature required for
+that connection type.
 
-As of 6.31, this signature is
-`"E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?"`, where $ { ' } is the desired
-target. Please see https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html
-for more information on the signature format.
+| CHANNEL | Name  | Required Function                                                                                  |
+| ------- | ----- | -------------------------------------------------------------------------------------------------- |
+| 0       | Lobby | Currently unimplemented.                                                                           |
+| 1       | Zone  | `RecvZonePacket`: `"E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?"` (as of global version 6.31h) |
+| 2       | Chat  | Currently unimplemented                                                                            |
+
+For updating signatures, please see
+https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html for more information
+on the format.
+
+#### Error Handling
 
 Deucalion will gracefully handle error cases by responding with a `Debug`-OP
-Payload with the request ID and error message as the data. The error cases that
-are handled include but are not limited to:
+Payload containing the error message. The error cases that are handled include
+but are not limited to:
   - DATA could not be decoded as a string.
   - The string could not be parsed as a valid signature.
   - The signature could not be found in memory.
   - The `RecvZonePacket` hook was already initialized.
 
+#### Example
 Here is an example interaction between Deucalion and a subscriber:
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 0, DATA: u8"SERVER HELLO" }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO" }
 // Subscriber: Request with an invalid sig.
-Payload { OP: OP.Recv, CHANNEL: 123, DATA: u8"invalid sig" }
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"invalid sig" }
 // Deucalion: Response with an invalid sig.
-Payload { OP: OP.Debug, CHANNEL: 123, DATA: u8"Error setting up hook: Invalid signature: \"invalid sig\"..." }
+Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Invalid signature: \"invalid sig\"..." }
 // Subscriber: Request with a valid sig. Note that it is still possible to
 //             attempt to set up the hook again after an error like an invalid
 //             sig.
-Payload { OP: OP.Recv, CHANNEL: 124, DATA: u8"E8 $ { ' } ..." }
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"E8 $ { ' } ..." }
 // Deucalion: OK response
-Payload { OP: OP.Debug, CHANNEL: 124, DATA: u8"OK" }
+Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"OK" }
 // Deucalion: Data streamed from hook
-Payload { OP: OP.Recv, CHANNEL: 1, DATA: "(Insert block data here)" }
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ```
 
 ## FFXIV Packet Data Format

@@ -34,7 +34,7 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
             debug!("{:?}", payload);
         }
         rpc::MessageOps::Recv => {
-            if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data) {
+            if let Err(e) = parse_sig_and_initialize_hook(hs, payload.ctx, payload.data) {
                 let err = format_err!("Error setting up hook: {:?}", e);
                 debug!("{:?}", err);
                 return Err(err);
@@ -45,9 +45,18 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     Ok(())
 }
 
-fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
+fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, channel: u32, data: Vec<u8>) -> Result<()> {
     let sig_str = String::from_utf8(data).context("Invalid string")?;
-    hs.initialize_recv_hook(sig_str)
+    match channel {
+        0 => Err(format_err!(
+            "Support for RecvLobby hooking not yet implemented."
+        )),
+        1 => hs.initialize_recv_zone_hook(sig_str),
+        2 => Err(format_err!(
+            "Support for RecvChat hooking not yet implemented."
+        )),
+        _ => Err(format_err!("Unknown channel: {}", channel)),
+    }
 }
 
 #[tokio::main]

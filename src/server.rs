@@ -191,7 +191,7 @@ where
         .send(
             rpc::Payload {
                 op: rpc::MessageOps::Debug,
-                ctx: 0,
+                ctx: 9000,
                 data: String::from("SERVER HELLO").into_bytes(),
             }
             .into(),
