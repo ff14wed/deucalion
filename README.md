@@ -1,16 +1,16 @@
 # Deucalion
 
-High-performance library for message capture for FFXIV. This library is fairly
-limited in scope and it is intended to be used in conjunction with other message
-handling applications.
+High-performance Windows library for capturing decoded FFXIV packets. This
+library is fairly limited in scope and it is intended to be used in conjunction
+with other packet handling applications.
 
 ## Features
 
-  - This library can be used as message sniffer for FFXIV without having to worry about
-    out-of-order TCP packets.
-  - The hook server supports multiple clients connecting to the named pipe at once.
+  - This library can be used as a sniffer on the FFXIV packet protocol layer
+    without concern for the lower-level TCP layer.
   - This method of capture is not susceptible to the limitations of
     libpcap-based capture.
+  - The hook server supports multiple client connections at once.
 
 ## Building
 
@@ -28,8 +28,8 @@ This hook runs as part of a server which exposes a very basic
 [Named Pipe](https://docs.microsoft.com/en-us/windows/win32/ipc/named-pipes)
 protocol for reading and writing packets.
 
-1. Inject this DLL into `ffxiv_dx11.exe` with any method you choose. If built
-  in debug mode, then a console window will appear after attaching.
+1. Inject `deucalion.dll` into `ffxiv_dx11.exe` with any method you choose. If
+   built in debug mode, a console window will appear after attaching.
 1. Initiate a Named pipe session with the hook by connecting to
   `\\.\pipe\deucalion-{FFXIV PID}`. For example, if the PID of a running
   FFXIV process is 9000, then the name of the pipe is
@@ -38,7 +38,7 @@ protocol for reading and writing packets.
   signature for `RecvZonePacket` in the DATA field. If signature is accepted,
   then the server will reply with an `OK` response. Please see [Client-to-Server
   Protocol](#client-to-server-protocol) for more info.
-1. The hook will begin logging all calls to the FFXIV message handler through
+1. The hook will begin logging all calls to the FFXIV packet handler through
   the pipe.
 
 ## Payload Format
@@ -61,7 +61,7 @@ This is the total length of the entire payload, including the length bytes.
 | 0   | Debug | Used for passing debug text messages.                                                                                                   |
 | 1   | Ping  | Used to maintain a connection between client and the hook server. The hook will echo a "pong" with the same op when it receives a ping. |
 | 2   | Exit  | Used to signal the hook to unload itself from the host process.                                                                         |
-| 3   | Recv  | When sent from the hook, contains the FFXIV message received by the host process.                                                       |
+| 3   | Recv  | When sent from the hook, contains the FFXIV packet received by the host process.                                                        |
 
 ### Channel
 
@@ -85,10 +85,10 @@ packet types:
 
 For payloads with OP `Debug`, the payload is simply debug-logged.
 
-For payloads with OP `Recv`, the data is the FFXIV message sent by the host
-process.  Because this is a hook and not a packet capture sniffer, the messages
-are already in the correct order, but they still need to be decoded by the
-client.
+For payloads with OP `Recv`, the data is the FFXIV packet sent by the host
+process. The packets are already in the correct order, but they still need to be
+decoded by the client. See [FFXIV Packet Data Format](#ffxiv-packet-data-format)
+for more information on how to handle this data.
 
 ## Client-to-Server Protocol
 
@@ -146,3 +146,88 @@ Payload { OP: OP.Debug, CHANNEL: 124, DATA: u8"OK" }
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: "(Insert block data here)" }
 ```
 
+## FFXIV Packet Data Format
+
+Data broadcasted with the `Recv` OP is sent to the client in a
+Deucalion-specific format:
+
+```c
+struct DEUCALION_SEGMENT {
+  uint32_t source_actor;
+  uint32_t target_actor;
+  FFXIVARR_IPC_HEADER ipc_header; // Includes opcode, serverId
+  uint8_t packet_data[];
+}
+```
+
+### Details
+
+There are a multitude of terms out there for describing the same data
+structures and it may sometimes be confusing, so let's clarify what we mean by
+*FFXIV packet*.
+
+TCP data arrives in individual units called *segments*, which may also be called
+*TCP packets*.
+
+FFXIV data arrives in containers that are called a multitude of
+different things, but ultimately it does not matter so we'll call them *frames*
+here.  On the wire, they may be split across multiple TCP segments, but this is
+a detail that is abstracted away here.
+
+Each frame contains data that is potentially compressed, and this data typically
+includes one or more *FFXIV segments*. Each segment encapulates segment header
+information and the data, which is what we actually refer to as the *FFXIV
+packet data*.
+
+Using names from https://xiv.dev/network/packet-structure, the following is a
+diagram of what this looks like. Deucalion extracts the innermost packet data
+after it has been decoded and decompressed.
+
+```
+┌───────────────────────────────────────────────┐
+│  Frame                                        │
+│ ┌───────────────────────────────────────────┐ │
+│ │ FFXIVARR_PACKET_HEADER                    │ │
+│ │                                           │ │
+│ │ ...                                       │ │
+│ │ uint32_t size;                            │ │
+│ │ uint16_t connectionType;                  │ │
+│ │ uint16_t segmentCount;                    │ │
+│ │ ...                                       │ │
+│ │ uint8_t isCompressed;                     │ │
+│ │ ...                                       │ │
+│ │ uint32_t decompressedSize;                │ │
+│ └───────────────────────────────────────────┘ │
+│ ┌───────────────────────────────────────────┐ │
+│ │ Compressed Data                           │ │
+│ │ ┌───────────────────────────────────────┐ │ │
+│ │ │ Segment 1                             │ │ │
+│ │ │ ┌───────────────────────────────────┐ │ │ │
+│ │ │ │ FFXIVARR_PACKET_SEGMENT_HEADER    │ │ │ │
+│ │ │ │                                   │ │ │ │
+│ │ │ │ uint32_t size;                    │ │ │ │
+│ │ │ │ uint32_t source_actor;            │ │ │ │
+│ │ │ │ uint32_t target_actor;            │ │ │ │
+│ │ │ │ uint16_t type; // SEGMENTTYPE_IPC │ │ │ │
+│ │ │ │ ...                               │ │ │ │
+│ │ │ ├───────────────────────────────────┤ │ │ │
+│ │ │ │ FFXIVARR_IPC_HEADER               │ │ │ │
+│ │ │ │                                   │ │ │ │
+│ │ │ │ uint16_t reserved; // 0x0014      │ │ │ │
+│ │ │ │ uint16_t type; // Opcode          │ │ │ │
+│ │ │ │ uint16_t padding;                 │ │ │ │
+│ │ │ │ uint16_t serverId;                │ │ │ │
+│ │ │ │ uint32_t timestamp;               │ │ │ │
+│ │ │ │ uint32_t padding1;                │ │ │ │
+│ │ │ ├───────────────────────────────────┤ │ │ │
+│ │ │ │ PACKET_DATA                       │ │ │ │
+│ │ │ │ ...                               │ │ │ │
+│ │ │ └───────────────────────────────────┘ │ │ │
+│ │ └───────────────────────────────────────┘ │ │
+│ │ ┌───────────────────────────────────────┐ │ │
+│ │ │ Segment 2                             │ │ │
+│ │ │ ...                                   │ │ │
+│ │ └───────────────────────────────────────┘ │ │
+│ └───────────────────────────────────────────┘ │
+└───────────────────────────────────────────────┘
+```
