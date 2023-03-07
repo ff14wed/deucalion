@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 
 use once_cell::sync::OnceCell;
 
-use detour;
-use detour::static_detour;
+use retour;
+use retour::static_detour;
 
 use crate::hook::waitgroup;
 use crate::rpc;
@@ -28,7 +28,7 @@ pub struct Hook {
 
     hook: Arc<
         OnceCell<
-            &'static detour::StaticDetour<
+            &'static retour::StaticDetour<
                 unsafe extern "system" fn(*const u8, usize, *const usize) -> usize,
             >,
         >,

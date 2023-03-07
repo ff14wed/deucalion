@@ -19,7 +19,7 @@ bytes = "1.4.0"
 stream-cancel = "0.8.1"
 log = "0.4"
 simplelog = "0.12"
-detour = { git = "https://github.com/Hpmason/detour-rs", branch = "fix-nightly1.67.0-changes" }
+retour = "0.1.0"
 parking_lot = "0.12.1"
 pelite = "0.10"
 memchr = "2.5"
