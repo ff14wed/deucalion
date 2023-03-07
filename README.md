@@ -109,11 +109,11 @@ request, where CHANNEL denotes one of the connection channels listed below and
 DATA is a UTF-8-encoded string containing the function signature required for
 that connection type.
 
-| CHANNEL | Name  | Required Function                                                                                  |
-| ------- | ----- | -------------------------------------------------------------------------------------------------- |
-| 0       | Lobby | Currently unimplemented.                                                                           |
-| 1       | Zone  | `RecvZonePacket`: `"E8 $ { ' } 84 C0 0F 85 ? ? ? ? 44 0F B6 64 24 ?"` (as of global version 6.31h) |
-| 2       | Chat  | Currently unimplemented                                                                            |
+| CHANNEL | Name  | Required Function                                                          |
+| ------- | ----- | -------------------------------------------------------------------------- |
+| 0       | Lobby | Currently unimplemented.                                                   |
+| 1       | Zone  | `RecvZonePacket`: `"49 8B 40 10 4C 8B 50 38"` (as of global version 6.31h) |
+| 2       | Chat  | Currently unimplemented                                                    |
 
 For updating signatures, please see
 https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html for more information
@@ -182,7 +182,7 @@ Deucalion-specific format:
 struct DEUCALION_SEGMENT {
   uint32_t source_actor;
   uint32_t target_actor;
-  FFXIVARR_IPC_HEADER ipc_header; // Includes opcode, serverId
+  FFXIVARR_IPC_HEADER ipc_header; // Includes reserved, type (opcode), serverId, etc.
   uint8_t packet_data[];
 }
 ```

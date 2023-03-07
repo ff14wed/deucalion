@@ -19,7 +19,7 @@ use crate::procloader::get_ffxiv_handle;
 use log::info;
 
 static_detour! {
-    static RecvZonePacket: unsafe extern "system" fn(*const u8, *const usize) -> usize;
+    static RecvZonePacket: unsafe extern "system" fn(*const u8, usize, *const usize) -> usize;
 }
 
 #[derive(Clone)]
@@ -29,7 +29,7 @@ pub struct Hook {
     hook: Arc<
         OnceCell<
             &'static detour::StaticDetour<
-                unsafe extern "system" fn(*const u8, *const usize) -> usize,
+                unsafe extern "system" fn(*const u8, usize, *const usize) -> usize,
             >,
         >,
     >,
@@ -54,9 +54,9 @@ impl Hook {
         let self_clone = self.clone();
 
         let hook = unsafe {
-            let rzp: unsafe extern "system" fn(*const u8, *const usize) -> usize =
+            let rzp: unsafe extern "system" fn(*const u8, usize, *const usize) -> usize =
                 mem::transmute(ptr_rzp as *const ());
-            RecvZonePacket.initialize(rzp, move |a, b| self_clone.recv_zone_packet(a, b))?
+            RecvZonePacket.initialize(rzp, move |a, b, c| self_clone.recv_zone_packet(a, b, c))?
         };
         self.hook
             .set(hook)
@@ -68,18 +68,18 @@ impl Hook {
         Ok(())
     }
 
-    unsafe fn recv_zone_packet(&self, this: *const u8, a2: *const usize) -> usize {
+    unsafe fn recv_zone_packet(&self, this: *const u8, a2: usize, a3: *const usize) -> usize {
         let _guard = self.wg.add();
 
         let ret = self
             .hook
             .get()
             .expect("Hook function was called without a valid hook")
-            .call(this, a2);
+            .call(this, a2, a3);
 
-        let ptr_received_packet: *const u8 = *(a2.add(2)) as *const u8;
+        let ptr_received_packet: *const u8 = *(a3.add(2)) as *const u8;
 
-        if ptr_received_packet.is_null() || ret == 0 {
+        if ptr_received_packet.is_null() {
             return ret;
         }
 
