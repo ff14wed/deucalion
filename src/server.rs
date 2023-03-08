@@ -7,7 +7,7 @@ use anyhow::{format_err, Error, Result};
 
 use futures::{SinkExt, Stream, StreamExt};
 
-use parity_tokio_ipc::{Endpoint, SecurityAttributes};
+use crate::namedpipe::Endpoint;
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::Framed;
 
@@ -263,8 +263,7 @@ where
 {
     let (trigger, tripwire) = Tripwire::new();
 
-    let mut endpoint = Endpoint::new(pipe_name);
-    endpoint.set_security_attributes(SecurityAttributes::allow_everyone_create()?);
+    let endpoint = Endpoint::new(pipe_name);
 
     let incoming = endpoint.incoming()?.take_until(tripwire);
 
@@ -292,4 +291,93 @@ where
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ntest::timeout;
+    use rand::Rng;
+    use winapi::um::processthreadsapi;
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
+    async fn named_pipe_load_test() {
+        let (signal_tx, signal_rx) = mpsc::channel(1);
+        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
+        let state_clone = state.clone();
+
+        let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", pid);
+        let pipe_name_clone = pipe_name.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = run(pipe_name_clone, state, signal_rx, move |_: rpc::Payload| {
+                Ok(())
+            })
+            .await
+            {
+                panic!("Server should not fail to run: {:?}", e);
+            }
+        });
+
+        // Give the server some time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let client = Endpoint::connect(&pipe_name)
+            .await
+            .expect("Failed to connect client to server");
+
+        // Create a frame decoder that processes the client stream
+        let codec = rpc::PayloadCodec::new();
+        let frames = Framed::new(client, codec);
+        // This state isn't really used for anything
+        let (dummy_signal_tx, _) = mpsc::channel(1);
+        let dummy_state = Arc::new(Mutex::new(Shared::new(dummy_signal_tx)));
+        let mut peer = Peer::new(dummy_state, frames).await.unwrap();
+
+        // Handle the SERVER_HELLO message
+        let peer_message = peer.next().await.unwrap();
+        if let Ok(Message::Request(payload)) = peer_message {
+            assert_eq!(payload.ctx, 9000);
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        // Synchronously send many packets before the client can process them
+        const NUM_PACKETS: u32 = 10000;
+        for i in 0..NUM_PACKETS {
+            let mut dummy_data = Vec::from([0u8; 5000]);
+            rand::thread_rng().fill(&mut dummy_data[..]);
+
+            state_clone
+                .lock()
+                .await
+                .broadcast(rpc::Payload {
+                    op: rpc::MessageOps::Debug,
+                    ctx: i,
+                    data: dummy_data,
+                })
+                .await;
+        }
+
+        // Test that every packet was received in order
+        let mut num_received = 0u32;
+        while let Some(result) = peer.next().await {
+            match result {
+                // A request was received from the current user
+                Ok(Message::Request(payload)) => {
+                    assert_eq!(
+                        payload.ctx, num_received,
+                        "Received data from pipe does not match expected index!"
+                    );
+                    num_received += 1;
+                    if num_received >= NUM_PACKETS {
+                        return;
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
 }

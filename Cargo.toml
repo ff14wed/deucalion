@@ -9,9 +9,8 @@ name = "deucalion"
 crate-type = ["dylib"]
 
 [dependencies]
-tokio = { version = "1.25.0", features = ["io-util", "sync", "rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.25.0", features = ["io-util", "sync", "rt", "rt-multi-thread", "net", "time", "macros"] }
 tokio-util = { version = "0.7.4", features = ["codec", "compat"] }
-parity-tokio-ipc = "0.9"
 futures = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -30,3 +29,7 @@ once_cell = "1.17"
 winapi = { version = "0.3", features = [
   "minwindef", "minwinbase", "processthreadsapi", "libloaderapi", "consoleapi", "wincon"
 ] }
+
+[dev-dependencies]
+ntest = "*"
+rand = "0.8.5"

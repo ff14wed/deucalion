@@ -20,6 +20,7 @@ use tokio::select;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 mod hook;
+mod namedpipe;
 mod procloader;
 mod rpc;
 mod server;
