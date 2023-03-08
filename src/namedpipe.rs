@@ -90,6 +90,7 @@ impl Endpoint {
     }
 
     /// Make new connection using the provided path and running event pool.
+    #[allow(dead_code)]
     pub async fn connect<P: AsRef<Path>>(path: P) -> io::Result<Connection> {
         let path = path.as_ref();
 
