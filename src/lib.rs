@@ -21,9 +21,10 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 mod hook;
 mod namedpipe;
-mod procloader;
 mod rpc;
 mod server;
+
+pub mod procloader;
 
 use log::{debug, error, info};
 use simplelog::{self, LevelFilter, SimpleLogger};

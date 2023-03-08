@@ -48,8 +48,8 @@ impl Hook {
         })
     }
 
-    pub fn setup(&self, recvzonepacket_rva: isize) -> Result<()> {
-        let ptr_rzp = get_ffxiv_handle()?.wrapping_offset(recvzonepacket_rva);
+    pub fn setup(&self, recvzonepacket_rva: usize) -> Result<()> {
+        let ptr_rzp = get_ffxiv_handle()?.wrapping_offset(recvzonepacket_rva as isize);
 
         let self_clone = self.clone();
 

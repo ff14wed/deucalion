@@ -6,7 +6,7 @@ edition = "2021"
 
 [lib]
 name = "deucalion"
-crate-type = ["dylib"]
+crate-type = ["rlib", "dylib"]
 
 [dependencies]
 tokio = { version = "1.25.0", features = ["io-util", "sync", "rt", "rt-multi-thread", "net", "time", "macros"] }

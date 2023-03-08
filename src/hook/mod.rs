@@ -4,7 +4,7 @@ use anyhow::{format_err, Context, Result};
 
 use tokio::sync::{mpsc, Mutex};
 
-use crate::procloader::{get_ffxiv_handle, sig_scan_helper};
+use crate::procloader::{find_pattern_matches, get_ffxiv_handle};
 use pelite::pattern;
 use pelite::pe::PeView;
 
@@ -39,10 +39,10 @@ impl State {
         let handle_ffxiv = get_ffxiv_handle()?;
         let pe_view = unsafe { PeView::module(handle_ffxiv) };
 
-        let recvzonepacket_rva = sig_scan_helper("RecvZonePacket", sig, pe_view, 8)
+        let recvzonepacket_rvas = find_pattern_matches("RecvZonePacket", sig, pe_view)
             .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
-        self.rzp_hook.setup(recvzonepacket_rva)
+        self.rzp_hook.setup(recvzonepacket_rvas[0])
     }
 
     pub fn shutdown(&self) {

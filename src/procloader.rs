@@ -34,7 +34,7 @@ enum ProcLoaderError {
 enum SigScanError {
     #[error("Could not find a signature match for {}", name)]
     MatchNotFound { name: &'static str },
-    #[error("Invalid signature match for {}", name)]
+    #[error("The signature for {} matched something invalid", name)]
     InvalidMatch { name: &'static str },
 }
 
@@ -117,36 +117,47 @@ pub fn get_virtual_function_ptr(
     }
 }
 
+/// Searches for a pattern using an excerpt finding method. This function
+/// returns only one search result.
+///
+/// # Arguments
+/// * `pat` - pattern to match
+/// * `pe` - the PE to search through
+/// * `save` - each level of the result is saved as additional entries in this
+/// array
+/// * `search_start_rva` - Optionally specify that the search range starts at a
+/// different relative virtual address. Set to 0 for starting at the beginning.
 pub fn fast_pattern_scan<'a, P: Pe<'a>>(
     pat: &[pat::Atom],
     pe: P,
     save: &mut [Rva],
+    search_start_rva: usize,
 ) -> Result<bool> {
     let pat_len = get_pat_len(pat)?;
-    let (excerpt, excerpt_rva) = get_excerpt(pat);
+    let (excerpt, excerpt_offset) = get_excerpt(pat);
     let image_range = pe.headers().code_range();
     let image = pe.image();
     let pattern_scanner = pe.scanner();
 
-    let mut start = image_range.start as usize + excerpt_rva;
+    let mut start = image_range.start as usize + usize::max(search_start_rva, excerpt_offset);
     let end = image_range.end as usize;
     debug!(
-        "Using pat len {:?} and excerpt {:x?} with rva {:?}",
-        pat_len, excerpt, excerpt_rva,
+        "Using pat len {:?} and excerpt {:x?} with excerpt_offset {:?}",
+        pat_len, excerpt, excerpt_offset,
     );
     let finder = memmem::Finder::new(excerpt.as_slice());
 
     while start < end {
         match finder.find(&image[start..end]) {
             Some(loc) => {
-                let pattern_start = loc + start - excerpt_rva;
+                let pattern_start = loc + start - excerpt_offset;
                 let pattern_start_rva = pattern_start as u32;
                 if pattern_scanner.finds(pat, pattern_start_rva..pattern_start_rva + pat_len, save)
                 {
                     return Ok(true);
                 }
                 // If pattern not found, continue
-                start = pattern_start as usize + excerpt_rva as usize + excerpt.len();
+                start = pattern_start as usize + excerpt_offset as usize + excerpt.len();
             }
             None => return Ok(false),
         }
@@ -154,37 +165,51 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
     Ok(false)
 }
 
-pub fn sig_scan_helper<'a, P: Pe<'a>>(
+/// Returns the addresses that match a given signature.
+///
+/// This function truncates the match list to at most 100 addresses.
+pub fn find_pattern_matches<'a, P: Pe<'a>>(
     name: &'static str,
     pat: &[pat::Atom],
     pe: P,
-    depth: usize,
-) -> Result<isize> {
-    let mut save = [0; 8];
+) -> Result<Vec<usize>> {
+    let mut addrs: Vec<usize> = Vec::new();
 
-    let res = fast_pattern_scan(pat, pe, &mut save)?;
-    if !res {
-        return Err(SigScanError::MatchNotFound { name }.into());
-    }
+    let mut start_rva: usize = 0;
 
-    let mut deepest = 0;
-    if depth >= 8 {
+    for _ in 0..100 {
+        // This loop should usually terminate early because it returns when the
+        // pattern can no longer be found or if start_rva goes past the end of
+        // the image range.
+
+        let mut save = [0; 8];
+
+        let match_found = fast_pattern_scan(pat, pe, &mut save, start_rva)?;
+        if !match_found {
+            break;
+        }
+
+        let mut deepest = 0;
         for i in 0..8 {
             if save[i] > 0 {
                 deepest = i
             }
         }
-    } else {
-        deepest = depth;
+
+        if save[deepest] == 0 {
+            return Err(SigScanError::InvalidMatch { name }.into());
+        }
+
+        let rva: usize = save[deepest].try_into()?;
+        addrs.push(rva);
+        start_rva = rva + 1;
     }
 
-    if save[deepest] == 0 {
-        return Err(SigScanError::InvalidMatch { name }.into());
+    if addrs.is_empty() {
+        return Err(SigScanError::MatchNotFound { name }.into());
     }
-
-    let rva: isize = save[deepest].try_into()?;
-    debug!("Found {} rva: {:x?}", name, rva);
-    Ok(rva)
+    debug!("Found {} addr(s): {:x?}", name, addrs);
+    Ok(addrs)
 }
 
 fn get_pat_len(pat: &[pat::Atom]) -> Result<u32> {
