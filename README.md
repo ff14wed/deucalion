@@ -189,6 +189,7 @@ Deucalion-specific format:
 struct DEUCALION_SEGMENT {
   uint32_t source_actor;
   uint32_t target_actor;
+  uint64_t timestamp; // milliseconds since UNIX epoch
   FFXIVARR_IPC_HEADER ipc_header; // Includes reserved, type (opcode), serverId, etc.
   uint8_t packet_data[];
 }

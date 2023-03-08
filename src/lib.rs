@@ -53,7 +53,7 @@ fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, channel: u32, data: Vec<u
         0 => Err(format_err!(
             "Support for RecvLobby hooking not yet implemented."
         )),
-        1 => hs.initialize_recv_zone_hook(sig_str),
+        1 => hs.initialize_recv_hook(sig_str),
         2 => Err(format_err!(
             "Support for RecvChat hooking not yet implemented."
         )),
