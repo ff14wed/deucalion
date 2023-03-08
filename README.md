@@ -26,6 +26,11 @@ with other packet handling applications.
 3. `cd` into `deucalion` and run `cargo build`. The DLL will be located in
   `target/debug/deucalion.dll`.
 
+> :information_source: A console window will appear when the DLL is running
+> if the DLL is compiled in the debug profile. To hide the console window,
+> compile the DLL in the release profile by supplying `--release` to
+> the `cargo build` command.
+
 ## Basic Usage
 
 On initialization, Deucalion exposes a
