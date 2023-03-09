@@ -29,6 +29,8 @@ pub mod procloader;
 use log::{debug, error, info};
 use simplelog::{self, LevelFilter, SimpleLogger};
 
+const RECV_HOOK_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
+
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     debug!("Received payload: {:?}", payload);
     match payload.op {
@@ -36,8 +38,8 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
             debug!("{:?}", payload);
         }
         rpc::MessageOps::Recv => {
-            if let Err(e) = parse_sig_and_initialize_hook(hs, payload.ctx, payload.data) {
-                let err = format_err!("Error setting up hook: {:?}", e);
+            if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data) {
+                let err = format_err!("error initializing hook: {:?}", e);
                 debug!("{:?}", err);
                 return Err(err);
             }
@@ -47,33 +49,43 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     Ok(())
 }
 
-fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, channel: u32, data: Vec<u8>) -> Result<()> {
+fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
     let sig_str = String::from_utf8(data).context("Invalid string")?;
-    match channel {
-        0 => Err(format_err!(
-            "Support for RecvLobby hooking not yet implemented."
-        )),
-        1 => hs.initialize_recv_hook(sig_str),
-        2 => Err(format_err!(
-            "Support for RecvChat hooking not yet implemented."
-        )),
-        _ => Err(format_err!("Unknown channel: {}", channel)),
-    }
+    hs.initialize_recv_hook(sig_str)
 }
 
 #[tokio::main]
 async fn main_with_result() -> Result<()> {
-    let hs = Arc::new(hook::State::new().context("Error setting up the hook")?);
-    let hs_clone = hs.clone();
+    let hs = Arc::new(hook::State::new().context("error setting up the hook")?);
 
     let (signal_tx, signal_rx) = mpsc::channel(1);
     let state = Arc::new(Mutex::new(server::Shared::new(signal_tx)));
-    let state_clone = state.clone();
 
+    // Asynchronously attempt to initialize the hooks
+    let hs_clone = hs.clone();
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        let initialized_recv = {
+            if let Err(e) = hs_clone.initialize_recv_hook(RECV_HOOK_SIG.into()) {
+                debug!("Could not auto-initialize the recv hook: {}", e);
+                false
+            } else {
+                true
+            }
+        };
+
+        let mut s = state_clone.lock().await;
+        s.set_recv_state(initialized_recv);
+        s.set_send_state(false);
+    });
+
+    // Message loop that forwards messages from the hooks to the server task
+    let hs_clone = hs.clone();
+    let state_clone = state.clone();
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
     let msg_loop_future = tokio::spawn(async move {
         loop {
-            let mut broadcast_rx = hs.broadcast_rx.lock().await;
+            let mut broadcast_rx = hs_clone.broadcast_rx.lock().await;
             select! {
                 res = broadcast_rx.recv() => {
                     if let Some(payload) = res {
@@ -81,7 +93,7 @@ async fn main_with_result() -> Result<()> {
                     }
                 },
                 _ = &mut shutdown_rx => {
-                    hs.shutdown();
+                    hs_clone.shutdown();
                     return ();
                 }
             }
@@ -91,6 +103,8 @@ async fn main_with_result() -> Result<()> {
     let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
     let pipe_name = format!(r"\\.\pipe\deucalion-{}", pid as u32);
 
+    // Block on server loop
+    let hs_clone = hs.clone();
     if let Err(e) = server::run(pipe_name, state, signal_rx, move |payload: rpc::Payload| {
         handle_payload(payload, hs_clone.clone())
     })

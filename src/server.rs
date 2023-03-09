@@ -34,6 +34,9 @@ pub struct Shared {
     peers: HashMap<usize, Tx>,
     counter: usize,
     signal: mpsc::Sender<()>,
+
+    recv_initialized: bool,
+    send_initialized: bool,
 }
 
 /// The state for each connected client.
@@ -61,6 +64,9 @@ impl Shared {
             peers: HashMap::new(),
             counter: 0,
             signal,
+
+            recv_initialized: false,
+            send_initialized: false,
         }
     }
 
@@ -68,6 +74,14 @@ impl Shared {
         let original = self.counter;
         self.counter += 1;
         return original;
+    }
+
+    pub fn set_recv_state(&mut self, initialized: bool) {
+        self.recv_initialized = initialized;
+    }
+
+    pub fn set_send_state(&mut self, initialized: bool) {
+        self.send_initialized = initialized;
     }
 
     pub async fn shutdown(&self) {
@@ -140,7 +154,7 @@ where
     }
 }
 
-/// Handle the client message and send a success/failure esponse back
+/// Handle the client message and send a success/failure response back
 async fn handle_client_message<T, F>(
     payload: rpc::Payload,
     peer: &mut Peer<T>,
@@ -151,13 +165,21 @@ where
     F: Fn(rpc::Payload) -> Result<(), Error>,
 {
     let ctx = payload.ctx;
+
+    let ack_prefix = {
+        match payload.op {
+            rpc::MessageOps::Recv => "RECV ",
+            _ => "",
+        }
+    };
+
     match payload_handler(payload) {
         Ok(()) => {
             peer.frames
                 .send(rpc::Payload {
                     op: rpc::MessageOps::Debug,
                     ctx,
-                    data: String::from("OK").into_bytes(),
+                    data: format!("{}OK", ack_prefix).into_bytes(),
                 })
                 .await?
         }
@@ -166,7 +188,7 @@ where
                 .send(rpc::Payload {
                     op: rpc::MessageOps::Debug,
                     ctx,
-                    data: String::from(e.to_string()).into_bytes(),
+                    data: format!("{}{}", ack_prefix, e).into_bytes(),
                 })
                 .await?
         }
@@ -184,15 +206,24 @@ where
     F: Fn(rpc::Payload) -> Result<(), Error>,
 {
     let codec = rpc::PayloadCodec::new();
-
     let mut frames = Framed::new(stream, codec);
+
+    let hello_string = {
+        let state = state.lock().await;
+        let recv_status = if state.recv_initialized {
+            "RECV INITIALIZED."
+        } else {
+            "RECV REQUIRES SIG."
+        };
+        format!("SERVER HELLO. STATUS: {}", recv_status)
+    };
 
     frames
         .send(
             rpc::Payload {
                 op: rpc::MessageOps::Debug,
                 ctx: 9000,
-                data: String::from("SERVER HELLO").into_bytes(),
+                data: hello_string.into_bytes(),
             }
             .into(),
         )

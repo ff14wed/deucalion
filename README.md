@@ -44,12 +44,10 @@ subscriber requests.
   `\\.\pipe\deucalion-{FFXIV PID}`. For example, if the PID of a running
   FFXIV process is 9000, then the name of the pipe is
   `\\.\pipe\deucalion-9000`.
-  1. Send a `Recv`-OP Payload request to Deucalion with the function
-  signature for `RecvZonePacket` in the DATA field. If signature is accepted,
-  then Deucalion will reply with an `OK` response. Please see [Subscriber
-  Protocol](#subscriber-protocol) for more info.
 1. Deucalion will begin broadcasting received Zone packets to all subscribers.
-1. Deucalion will close and unload itself once all clients are disconnected.
+   See [Data Format](#data-format) for information on the format of the
+   broadcasted packets.
+1. Deucalion will close and unload itself once all subscribers are disconnected.
 
 ## Payload Format
 
@@ -84,9 +82,8 @@ For payloads with OP `Debug`, the payload is simply debug-logged.
 
 For payloads with OP `Recv`, the data is the FFXIV packet sent by the host
 process. The packets are already in the correct order, but they still need to be
-decoded by your application. See [FFXIV Packet Data
-Format](#ffxiv-packet-data-format) for more information on how to handle this
-data.
+decoded by your application. See [Data Format](#data-format) for more
+information on how to handle this data.
 
 ## Subscriber Protocol
 
@@ -111,26 +108,20 @@ Deucalion will immediately begin unloading all hooks and cleaning itself from
 the host process without sending a response back to the subscriber.
 
 > :warning: It is not required to send this OP to Deucalion! Deucalion will
-> safely exit on its own once all clients are disconnected. Causing Deucalion
-> to exit early may cause undefined behavior in clients that are still
+> safely exit on its own once all subscribers are disconnected. Causing Deucalion
+> to exit early may cause undefined behavior in subscribers that are still
 > connected.
 
 ### Recv OP
 
-Payloads sent with the `Recv` OP will be handled as a Recv-hook initialization
-request, where CHANNEL denotes one of the connection channels listed below and
-DATA is a UTF-8-encoded string containing the function signature required for
-that connection type.
+In most cases, subscribers do not need to send a `Recv` OP payload to
+initialize the hook. However if the hook has not been automatically initialized,
+then subscribers may send a pattern signature as a UTF-8-encoded string in a
+`Recv` OP payload in order to manually initialize the hook.
 
-| CHANNEL | Name  | Required Function                                                          |
-| ------- | ----- | -------------------------------------------------------------------------- |
-| 0       | Lobby | Currently unimplemented.                                                   |
-| 1       | Zone  | `RecvZonePacket`: `"49 8B 40 10 4C 8B 50 38"` (as of global version 6.31h) |
-| 2       | Chat  | Currently unimplemented                                                    |
-
-For updating signatures, please see
-https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html for more information
-on the format.
+See [Example](#example) for this scenario.  For information on the signature
+format, please see
+https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html.
 
 > :warning: Once the Recv hook is initialized, all subscribers will receive the
 > packet stream regardless of whether or not their own initialization succeeded.
@@ -145,22 +136,22 @@ but are not limited to:
   - DATA could not be decoded as a string.
   - The string could not be parsed as a valid signature.
   - The signature could not be found in memory.
-  - The `RecvZonePacket` hook was already initialized.
+  - The hook was already initialized.
 
 #### Example
 Here is an example interaction between Deucalion and a subscriber:
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO" }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. STATUS: RECV REQUIRES SIG." }
 // Subscriber: Request with an invalid sig.
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"invalid sig" }
 // Deucalion: Response with an invalid sig error.
 Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Invalid signature: \"invalid sig\"..." }
-// Subscriber: Request with a valid sig. Note that it is still possible to
-//             attempt to set up the hook again after an error like an invalid
-//             sig.
-Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"E8 $ { ' } ..." }
+// Subscriber: Request with a valid sig as of FFXIV global version 6.35. Note
+// that it is still possible to attempt to set up the hook again after an error
+// like an invalid sig.
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"E8 $ { ' } 4C 8B 43 10 41 8B 40 18" }
 // Deucalion: OK response
 Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"OK" }
 // Deucalion: Data streamed to all subscribers
@@ -186,7 +177,7 @@ Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment2 }
 ```
 
 
-## FFXIV Packet Data Format
+## Data Format
 
 Data broadcasted with the `Recv` OP is sent to all subscribers in a
 Deucalion-specific format:
