@@ -37,6 +37,15 @@ jobs:
         gpg --output deucalion.sha256sum.asc --clearsign deucalion.sha256sum
         cat deucalion.sha256sum.asc
 
+    - name: Code Sign
+      uses: DanaBear/code-sign-action@v4
+      with:
+        certificate: '${{ secrets.CODE_SIGN_CERTIFICATE }}'
+        password: '${{ secrets.CODE_SIGN_PASSWORD }}'
+        certificatesha1: '${{ secrets.CODE_SIGN_THUMBPRINT }}'
+        folder: 'target/release'
+        recursive: true
+
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
