@@ -6,9 +6,8 @@ use thiserror::Error;
 
 use tokio::sync::{mpsc, Mutex};
 
-use crate::procloader::{find_pattern_matches, get_ffxiv_handle};
-use pelite::pattern;
-use pelite::pe::PeView;
+use crate::procloader::{find_pattern_matches, get_ffxiv_filepath};
+use pelite::{pattern, pe::PeView, ImageMap};
 
 use crate::rpc;
 
@@ -68,10 +67,12 @@ impl State {
         let pat =
             pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
         let sig: &[pattern::Atom] = &pat;
-        let handle_ffxiv = get_ffxiv_handle()?;
-        let pe_view = unsafe { PeView::module(handle_ffxiv) };
+        let ffxiv_file_path = get_ffxiv_filepath()?;
 
-        let rvas = find_pattern_matches("recv::DecompressPacket", sig, pe_view)
+        let image_map = ImageMap::open(&ffxiv_file_path).unwrap();
+        let pe_image = PeView::from_bytes(image_map.as_ref())?;
+
+        let rvas = find_pattern_matches("recv::DecompressPacket", sig, pe_image)
             .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
         self.recv_hook.setup(rvas)
@@ -81,10 +82,12 @@ impl State {
         let pat =
             pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
         let sig: &[pattern::Atom] = &pat;
-        let handle_ffxiv = get_ffxiv_handle()?;
-        let pe_view = unsafe { PeView::module(handle_ffxiv) };
+        let ffxiv_file_path = get_ffxiv_filepath()?;
 
-        let rvas = find_pattern_matches("recv::CompressPacket", sig, pe_view)
+        let image_map = ImageMap::open(&ffxiv_file_path).unwrap();
+        let pe_image = PeView::from_bytes(image_map.as_ref())?;
+
+        let rvas = find_pattern_matches("recv::CompressPacket", sig, pe_image)
             .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
         self.send_hook.setup(rvas)

@@ -1,13 +1,14 @@
-use std::mem;
-use std::ptr;
+use std::{mem, ptr};
 
 use winapi::shared::minwindef;
+use winapi::shared::minwindef::MAX_PATH;
 use winapi::um::libloaderapi;
 
-use std::ffi::{CString, OsStr};
+use std::ffi::{CString, OsStr, OsString};
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::prelude::OsStringExt;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use thiserror::Error;
 
 use pelite::pattern as pat;
@@ -76,6 +77,26 @@ pub fn get_ffxiv_handle() -> Result<*const u8> {
         }
         return Ok(handle_ffxiv);
     }
+}
+
+pub fn get_ffxiv_filepath() -> Result<String> {
+    let mut file_name_buf = [0u16; MAX_PATH];
+    let length_read = unsafe {
+        libloaderapi::GetModuleFileNameW(
+            0 as minwindef::HMODULE,
+            file_name_buf.as_mut_ptr(),
+            file_name_buf.len() as _,
+        )
+    };
+    if length_read == 0 {
+        return Err(ProcLoaderError::ModuleNotFound { name: "ffxiv" }.into());
+    }
+
+    let file_name_str = OsString::from_wide(&file_name_buf);
+    Ok(file_name_str
+        .to_str()
+        .context("could not convert FFXIV file path to UTF-8")?
+        .to_string())
 }
 
 #[allow(dead_code)]
