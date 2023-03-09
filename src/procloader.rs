@@ -17,7 +17,7 @@ use pelite::pe::Pe;
 
 use memchr::memmem;
 
-use log::debug;
+use log::{debug, info};
 
 #[derive(Debug, Error)]
 enum ProcLoaderError {
@@ -236,7 +236,7 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
     if addrs.is_empty() {
         return Err(SigScanError::MatchNotFound { name }.into());
     }
-    debug!("Found {} addr(s): {:x?}", name, addrs);
+    info!("Found {} addr(s): {:x?}", name, addrs);
     Ok(addrs)
 }
 

@@ -32,7 +32,7 @@ mod server;
 
 pub mod procloader;
 
-use log::{debug, error, info};
+use log::{error, info};
 
 #[cfg(debug_assertions)]
 use simplelog::{CombinedLogger, SimpleLogger};
@@ -41,22 +41,19 @@ const RECV_HOOK_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
 const SEND_HOOK_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
-    debug!("Received payload: {:?}", payload);
+    info!("Received payload from subscriber: {:?}", payload);
     match payload.op {
-        rpc::MessageOps::Debug => {
-            debug!("{:?}", payload);
-        }
         rpc::MessageOps::Recv => {
             if let Err(e) = parse_sig_and_initialize_recv_hook(hs, payload.data) {
                 let err = format_err!("error initializing hook: {:?}", e);
-                debug!("{:?}", err);
+                error!("{:?}", err);
                 return Err(err);
             }
         }
         rpc::MessageOps::Send => {
             if let Err(e) = parse_sig_and_initialize_send_hook(hs, payload.data) {
                 let err = format_err!("error initializing hook: {:?}", e);
-                debug!("{:?}", err);
+                error!("{:?}", err);
                 return Err(err);
             }
         }
@@ -88,7 +85,7 @@ async fn main_with_result() -> Result<()> {
     tokio::spawn(async move {
         let initialized_recv = {
             if let Err(e) = hs_clone.initialize_recv_hook(RECV_HOOK_SIG.into()) {
-                debug!("Could not auto-initialize the recv hook: {}", e);
+                error!("Could not auto-initialize the recv hook: {}", e);
                 false
             } else {
                 true
@@ -97,7 +94,7 @@ async fn main_with_result() -> Result<()> {
 
         let initialized_send = {
             if let Err(e) = hs_clone.initialize_send_hook(SEND_HOOK_SIG.into()) {
-                debug!("Could not auto-initialize the recv hook: {}", e);
+                error!("Could not auto-initialize the recv hook: {}", e);
                 false
             } else {
                 true
