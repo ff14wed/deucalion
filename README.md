@@ -49,6 +49,7 @@ subscriber requests.
   then Deucalion will reply with an `OK` response. Please see [Subscriber
   Protocol](#subscriber-protocol) for more info.
 1. Deucalion will begin broadcasting received Zone packets to all subscribers.
+1. Deucalion will close and unload itself once all clients are disconnected.
 
 ## Payload Format
 
@@ -69,7 +70,7 @@ This is the total length of the entire payload, including the length bytes.
 | --- | ----- | --------------------------------------------------------------------------------------------------------------------------------- |
 | 0   | Debug | Used for passing debug text messages.                                                                                             |
 | 1   | Ping  | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
-| 2   | Exit  | Used to signal Deucalion to unload itself from the host process.                                                                  |
+| 2   | Exit  | Used to signal Deucalion to unload itself from the host process. In most use cases, you will not need to send this op at all.     |
 | 3   | Recv  | When sent from Deucalion, contains the FFXIV packet received by the host process.                                                 |
 
 ### Channel
@@ -108,6 +109,11 @@ subscriber.
 
 Deucalion will immediately begin unloading all hooks and cleaning itself from
 the host process without sending a response back to the subscriber.
+
+> :warning: It is not required to send this OP to Deucalion! Deucalion will
+> safely exit on its own once all clients are disconnected. Causing Deucalion
+> to exit early may cause undefined behavior in clients that are still
+> connected.
 
 ### Recv OP
 

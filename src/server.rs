@@ -247,6 +247,10 @@ where
         info!("client disconnected: {}", peer.id);
         let mut state = state.lock().await;
         state.peers.remove(&peer.id);
+        // Exit once all clients are disconnected
+        if state.peers.len() == 0 {
+            state.shutdown().await;
+        }
     }
 
     Ok(())
