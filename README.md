@@ -68,13 +68,14 @@ This is the total length of the entire payload, including the length bytes.
 
 ### OP Types
 
-| OP  | Name  | Description                                                                                                                       |
-| --- | ----- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | Debug | Used for passing debug text messages.                                                                                             |
-| 1   | Ping  | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
-| 2   | Exit  | Used to signal Deucalion to unload itself from the host process. In most use cases, you will not need to send this op at all.     |
-| 3   | Recv  | When sent from Deucalion, contains the FFXIV packet received by the host process.                                                 |
-| 4   | Send  | When sent from Deucalion, contains the FFXIV packet sent by the host process.                                                     |
+| OP  | Name   | Description                                                                                                                       |
+| --- | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Debug  | Used for passing debug text messages.                                                                                             |
+| 1   | Ping   | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
+| 2   | Exit   | Used to signal Deucalion to unload itself from the host process. In most use cases, you will not need to send this op at all.     |
+| 3   | Recv   | When sent from Deucalion, contains the FFXIV packet received by the host process.                                                 |
+| 4   | Send   | When sent from Deucalion, contains the FFXIV packet sent by the host process.                                                     |
+| 5   | Option | Used to configure per-subscriber filtering for packets.                                                                           |
 
 ### Channel
 
@@ -174,7 +175,7 @@ packets, you can compute the filter value:
 ```
 and send the payload:
 ```c
-Payload { OP: OP.Recv, CHANNEL: 54}
+Payload { OP: OP.Option, CHANNEL: 54, DATA: <empty>}
 // Deucalion: Filter set response
 Payload { OP: OP.Debug, CHANNEL: 0, DATA: u8"Packet filters set: 0b00110110" }
 ```
