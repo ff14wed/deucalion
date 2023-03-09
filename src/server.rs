@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use anyhow::{format_err, Error, Result};
+use anyhow::{Error, Result};
 
 use futures::{SinkExt, Stream, StreamExt};
 
@@ -372,11 +372,11 @@ where
                 let handler = payload_handler.clone();
                 tokio::spawn(async move {
                     if let Err(e) = process(state, stream, handler).await {
-                        error!("error occurred processing stream = {:?}", e);
+                        error!("Error occurred when processing stream = {:?}", e);
                     }
                 });
             }
-            Err(e) => return Err(format_err!("Unable to connect to client: {}", e)),
+            Err(e) => error!("Unable to connect to client: {}", e),
         }
     }
     Ok(())
