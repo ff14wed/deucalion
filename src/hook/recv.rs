@@ -57,6 +57,9 @@ impl Hook {
     }
 
     pub fn setup(&self, rvas: Vec<usize>) -> Result<()> {
+        if rvas.len() != 3 {
+            return Err(HookError::SignatureMatchFailed(rvas.len(), 3).into());
+        }
         let mut ptrs: Vec<*const u8> = Vec::new();
         for rva in rvas {
             ptrs.push(get_ffxiv_handle()?.wrapping_offset(rva as isize));

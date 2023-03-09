@@ -44,6 +44,8 @@ impl Display for Channel {
 pub(self) enum HookError {
     #[error("failed to set up {0} hook")]
     SetupFailed(Channel),
+    #[error("number of signature matches is incorrect: {0} != {0}")]
+    SignatureMatchFailed(usize, usize),
 }
 
 impl State {
