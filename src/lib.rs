@@ -27,6 +27,8 @@ mod server;
 pub mod procloader;
 
 use log::{debug, error, info};
+
+#[cfg(debug_assertions)]
 use simplelog::{self, LevelFilter, SimpleLogger};
 
 const RECV_HOOK_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
