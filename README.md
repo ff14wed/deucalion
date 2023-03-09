@@ -49,6 +49,10 @@ subscriber requests.
    broadcasted packets.
 1. Deucalion will close and unload itself once all subscribers are disconnected.
 
+> :information_source: By default, Deucalion's will not send you packets for
+> anything other than received Zone packets. To allow other packet types, please
+> see the [Option OP](#option-op) section.
+
 ## Payload Format
 
 All communication with Deucalion follows this length-delimited protocol (ranges
@@ -141,6 +145,39 @@ https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html.
 ### Send OP
 
 What applies to `Recv` OP payloads also applies to `Send` OP payloads.
+
+### Option OP
+
+By default, Deucalion sets a per-subscriber filter that allows only `Recv`
+Zone payloads to be sent to the subscriber.
+
+Each subscriber can customize their own filter for what `Recv` or `Send` packets
+are sent by Deucalion. Other payload OPs such as `Debug` are not affected by
+this filter.
+
+Filters can be set by sending an `Option` OP with bitflags as the CHANNEL.
+
+| Flag   | Description                                          |
+| ------ | ---------------------------------------------------- |
+| 1 << 0 | Allows received Lobby packets.                       |
+| 1 << 1 | Allows received Zone packets.                        |
+| 1 << 2 | Allows received Chat packets.                        |
+| 1 << 3 | Allows sent Lobby packets.                           |
+| 1 << 4 | Allows sent Zone packets.                            |
+| 1 << 5 | Allows sent Chat packets.                            |
+| 1 << 6 | Allows other channels. Currently used for debugging. |
+
+For example, to allow received Zone, received Chat, sent Zone, and sent Chat
+packets, you can compute the filter value:
+```c
+54 == (1 << 1 | 1 << 2 | 1 << 4 | 1 << 5)
+```
+and send the payload:
+```c
+Payload { OP: OP.Recv, CHANNEL: 54}
+// Deucalion: Filter set response
+Payload { OP: OP.Debug, CHANNEL: 0, DATA: u8"Packet filters set: 0b00110110" }
+```
 
 #### Error Handling
 
