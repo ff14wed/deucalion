@@ -1,6 +1,10 @@
+use std::fs::{self, File};
 use std::io::{self, Read};
 use std::panic;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
+use simplelog::{self, LevelFilter, WriteLogger};
 #[cfg(windows)]
 use winapi::shared::minwindef::*;
 use winapi::um::libloaderapi;
@@ -19,6 +23,8 @@ use anyhow::{format_err, Context, Result};
 use tokio::select;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+use dirs;
+
 mod hook;
 mod namedpipe;
 mod rpc;
@@ -29,7 +35,7 @@ pub mod procloader;
 use log::{debug, error, info};
 
 #[cfg(debug_assertions)]
-use simplelog::{self, LevelFilter, SimpleLogger};
+use simplelog::{CombinedLogger, SimpleLogger};
 
 const RECV_HOOK_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
 const SEND_HOOK_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
@@ -167,14 +173,43 @@ fn pause() {
     let _ = io::stdin().read(&mut [0u8]).unwrap();
 }
 
-unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
+fn logging_setup() -> Result<()> {
+    let secs_since_epoch = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_secs();
+
+    let mut log_path = PathBuf::new();
+    log_path.push(dirs::data_dir().context("Data dir not found")?);
+    log_path.push("deucalion");
+    fs::create_dir_all(log_path.as_path())?;
+
+    log_path.push(format!("session-{}.log", secs_since_epoch));
+
+    let log_file = File::create(log_path.as_path())?;
+
     #[cfg(debug_assertions)]
     {
-        consoleapi::AllocConsole();
-        if let Err(e) = SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default()) {
-            println!("Error initializing logger: {:?}", e);
-        }
+        let _ = CombinedLogger::init(vec![
+            SimpleLogger::new(LevelFilter::Debug, simplelog::Config::default()),
+            WriteLogger::new(LevelFilter::Debug, simplelog::Config::default(), log_file),
+        ])?;
     }
+    #[cfg(not(debug_assertions))]
+    {
+        WriteLogger::init(LevelFilter::Info, simplelog::Config::default(), log_file)?;
+    }
+
+    Ok(())
+}
+
+unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
+    #[cfg(debug_assertions)]
+    consoleapi::AllocConsole();
+
+    if let Err(e) = logging_setup() {
+        println!("Error initializing logger: {:?}", e);
+    }
+
     let result = panic::catch_unwind(|| {
         if let Err(e) = main_with_result() {
             error!("Encountered fatal error: {:?}", e);
