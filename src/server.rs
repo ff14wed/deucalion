@@ -154,6 +154,36 @@ where
     }
 }
 
+#[repr(u32)]
+enum BroadcastFilter {
+    AllowLobbyRecv = 1,
+    AllowZoneRecv = 1 << 1,
+    AllowChatRecv = 1 << 2,
+    AllowLobbySend = 1 << 3,
+    AllowZoneSend = 1 << 4,
+    AllowChatSend = 1 << 5,
+    AllowOther = 1 << 6, // In case the channel is not one of [Lobby, Zone, Chat]
+}
+
+fn allow_broadcast(op: rpc::MessageOps, channel: u32, filter: u32) -> bool {
+    match op {
+        rpc::MessageOps::Recv => match channel {
+            0 => (filter & BroadcastFilter::AllowLobbyRecv as u32) > 0,
+            1 => (filter & BroadcastFilter::AllowZoneRecv as u32) > 0,
+            2 => (filter & BroadcastFilter::AllowChatRecv as u32) > 0,
+            _ => (filter & BroadcastFilter::AllowOther as u32) > 0,
+        },
+        rpc::MessageOps::Send => match channel {
+            0 => (filter & BroadcastFilter::AllowLobbySend as u32) > 0,
+            1 => (filter & BroadcastFilter::AllowZoneSend as u32) > 0,
+            2 => (filter & BroadcastFilter::AllowChatSend as u32) > 0,
+            _ => (filter & BroadcastFilter::AllowOther as u32) > 0,
+        },
+        // All other message ops are always allowed
+        _ => true,
+    }
+}
+
 /// Handle the client message and send a success/failure response back
 async fn handle_client_message<T, F>(
     payload: rpc::Payload,
@@ -247,6 +277,10 @@ where
         ctx: 0,
         data: Vec::new(),
     };
+
+    // Default packet filter is AllowZoneRecv only
+    let mut filter: u32 = BroadcastFilter::AllowZoneRecv as u32;
+
     // Process incoming messages until our stream is exhausted by a disconnect.
     while let Some(result) = peer.next().await {
         match result {
@@ -262,6 +296,16 @@ where
                         state.shutdown().await;
                         return Ok(());
                     }
+                    rpc::MessageOps::Option => {
+                        filter = payload.ctx;
+                        peer.frames
+                            .send(rpc::Payload {
+                                op: rpc::MessageOps::Debug,
+                                ctx: 0,
+                                data: format!("Packet filters set: {filter:#010b}").into_bytes(),
+                            })
+                            .await?
+                    }
                     _ => {
                         handle_client_message(payload, &mut peer, &payload_handler).await?;
                     }
@@ -270,7 +314,9 @@ where
 
             // A message was received from the broadcast.
             Ok(Message::Data(payload)) => {
-                peer.frames.send(payload).await?;
+                if allow_broadcast(payload.op, payload.ctx, filter) {
+                    peer.frames.send(payload).await?;
+                }
             }
             Err(e) => {
                 error!(
@@ -343,6 +389,27 @@ mod tests {
     use super::*;
     use ntest::timeout;
     use rand::Rng;
+    use tokio::select;
+
+    #[test]
+    fn test_individual_packet_filters() {
+        let configurations = [
+            (BroadcastFilter::AllowLobbyRecv, rpc::MessageOps::Recv, 0),
+            (BroadcastFilter::AllowZoneRecv, rpc::MessageOps::Recv, 1),
+            (BroadcastFilter::AllowChatRecv, rpc::MessageOps::Recv, 2),
+            (BroadcastFilter::AllowLobbySend, rpc::MessageOps::Send, 0),
+            (BroadcastFilter::AllowZoneSend, rpc::MessageOps::Send, 1),
+            (BroadcastFilter::AllowChatSend, rpc::MessageOps::Send, 2),
+            (BroadcastFilter::AllowOther, rpc::MessageOps::Recv, 100),
+        ];
+        const ALLOW_EVERYTHING: u32 = 0xFF;
+        for (filter, op, ctx) in configurations {
+            let filter = filter as u32;
+            assert_eq!(allow_broadcast(op, ctx, ALLOW_EVERYTHING), true);
+            assert_eq!(allow_broadcast(op, ctx, filter), true);
+            assert_eq!(allow_broadcast(op, ctx, ALLOW_EVERYTHING & !filter), false);
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
@@ -396,6 +463,101 @@ mod tests {
         let (dummy_signal_tx, _) = mpsc::channel(1);
         let dummy_state = Arc::new(Mutex::new(Shared::new(dummy_signal_tx)));
         return Peer::new(dummy_state, frames).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
+    async fn test_combined_broadcast_filters() {
+        let (signal_tx, signal_rx) = mpsc::channel(1);
+        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
+        let state_clone = state.clone();
+
+        let test_id: u16 = rand::thread_rng().gen();
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
+        let pipe_name_clone = pipe_name.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = run(pipe_name_clone, state, signal_rx, move |_: rpc::Payload| {
+                Ok(())
+            })
+            .await
+            {
+                panic!("Server should not fail to run: {:?}", e);
+            }
+        });
+
+        // Give the server some time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let client = Endpoint::connect(&pipe_name)
+            .await
+            .expect("Failed to connect client to server");
+
+        let mut peer = peer_from_client(client).await;
+
+        // Handle the SERVER_HELLO message
+        let peer_message = peer.next().await.unwrap();
+        if let Ok(Message::Request(payload)) = peer_message {
+            assert_eq!(payload.ctx, 9000);
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        let filter = BroadcastFilter::AllowChatRecv as u32
+            | BroadcastFilter::AllowChatSend as u32
+            | BroadcastFilter::AllowZoneRecv as u32;
+
+        // Send option
+        peer.frames
+            .send(rpc::Payload {
+                op: rpc::MessageOps::Option,
+                ctx: filter,
+                data: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let peer_message = peer.next().await.unwrap();
+        if let Ok(Message::Request(payload)) = peer_message {
+            assert_eq!(payload.op, rpc::MessageOps::Debug);
+            assert_eq!(
+                String::from_utf8(payload.data).unwrap(),
+                "Packet filters set: 0b00100110",
+            );
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        let configurations = vec![
+            (rpc::MessageOps::Recv, 0, false),
+            (rpc::MessageOps::Recv, 1, true),
+            (rpc::MessageOps::Recv, 2, true),
+            (rpc::MessageOps::Send, 0, false),
+            (rpc::MessageOps::Send, 1, false),
+            (rpc::MessageOps::Send, 2, true),
+            (rpc::MessageOps::Recv, 100, false),
+        ];
+
+        for (op, ctx, should_be_allowed) in configurations {
+            state_clone
+                .lock()
+                .await
+                .broadcast(rpc::Payload {
+                    op,
+                    ctx,
+                    data: Vec::new(),
+                })
+                .await;
+
+            select! {
+                payload = peer.next() => {
+                    assert_eq!(should_be_allowed, true, "packet should be filtered: {:?}", payload)
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    assert_eq!(should_be_allowed, false, "packet should not be filtered: {:?}: {}", op, ctx)
+                }
+            }
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
