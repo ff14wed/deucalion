@@ -58,7 +58,7 @@ jobs:
         body: "# CHANGELOG"
         draft: true
         files: |
-          deucalion.dll
-          deucalion.sha256sum
-          deucalion.sha256sum.asc
+          deucalion/deucalion.dll
+          deucalion/deucalion.sha256sum
+          deucalion/deucalion.sha256sum.asc
 
