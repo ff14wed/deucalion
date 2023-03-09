@@ -70,19 +70,29 @@ This is the total length of the entire payload, including the length bytes.
 | 1   | Ping  | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
 | 2   | Exit  | Used to signal Deucalion to unload itself from the host process. In most use cases, you will not need to send this op at all.     |
 | 3   | Recv  | When sent from Deucalion, contains the FFXIV packet received by the host process.                                                 |
+| 4   | Send  | When sent from Deucalion, contains the FFXIV packet sent by the host process.                                                     |
 
 ### Channel
 
 This is an identifier for the channel used for the payload. It is used to
 distinguish between streams of data (e.g., Zone packets vs Chat packets).
 
+For `Recv` and `Send` OPs, the following CHANNELs correspond to these packet
+types:
+
+| CHANNEL | Name  |
+| ------- | ----- |
+| 0       | Lobby |
+| 1       | Zone  |
+| 2       | Chat  |
+
 ### Data
 
 For payloads with OP `Debug`, the payload is simply debug-logged.
 
-For payloads with OP `Recv`, the data is the FFXIV packet sent by the host
-process. The packets are already in the correct order, but they still need to be
-decoded by your application. See [Data Format](#data-format) for more
+For payloads with OP `Recv` or `Send`, the data is the FFXIV packet sent by the
+host process. The packets are already in the correct order, but they still need
+to be decoded by your application. See [Data Format](#data-format) for more
 information on how to handle this data.
 
 ## Subscriber Protocol
@@ -127,6 +137,10 @@ https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html.
 > packet stream regardless of whether or not their own initialization succeeded.
 > As such, it is wise to begin handling data as soon as the named pipe
 > connection is established and handle initialization asynchronously.
+
+### Send OP
+
+What applies to `Recv` OP payloads also applies to `Send` OP payloads.
 
 #### Error Handling
 
