@@ -139,7 +139,13 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
     let image = pe.image();
     let pattern_scanner = pe.scanner();
 
-    let mut start = image_range.start as usize + usize::max(search_start_rva, excerpt_offset);
+    let mut start = if search_start_rva == 0 {
+        image_range.start as usize
+    } else {
+        search_start_rva
+    };
+    start = start + excerpt_offset;
+
     let end = image_range.end as usize;
     debug!(
         "Using pat len {:?} and excerpt {:x?} with excerpt_offset {:?}",
@@ -202,7 +208,8 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
 
         let rva: usize = save[deepest].try_into()?;
         addrs.push(rva);
-        start_rva = rva + 1;
+
+        start_rva = save[0] as usize + 1;
     }
 
     if addrs.is_empty() {

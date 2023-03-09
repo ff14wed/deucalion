@@ -9,6 +9,8 @@ pub enum MessageOps {
     Ping,
     Exit,
     Recv,
+    Send,
+    Option,
 }
 
 impl From<u8> for MessageOps {
@@ -18,6 +20,8 @@ impl From<u8> for MessageOps {
             1 => MessageOps::Ping,
             2 => MessageOps::Exit,
             3 => MessageOps::Recv,
+            4 => MessageOps::Send,
+            5 => MessageOps::Option,
             _ => MessageOps::Debug,
         }
     }
@@ -114,6 +118,16 @@ mod tests {
                 data: vec![1, 2, 3],
             },
             Payload {
+                op: MessageOps::Send,
+                ctx: 100,
+                data: vec![1, 2, 3],
+            },
+            Payload {
+                op: MessageOps::Option,
+                ctx: 100,
+                data: vec![1, 2, 3],
+            },
+            Payload {
                 op: MessageOps::Debug,
                 ctx: 100,
                 data: vec![1, 2, 3],
@@ -138,9 +152,13 @@ mod tests {
     #[test]
     fn decoder_handles_all_known_ops() {
         let data: &[u8] = &[
-            12, 0, 0, 0, 0, 100, 0, 0, 0, 1, 2, 3, 12, 0, 0, 0, 1, 100, 0, 0, 0, 1, 2, 3, 12, 0, 0,
-            0, 2, 100, 0, 0, 0, 1, 2, 3, 12, 0, 0, 0, 3, 100, 0, 0, 0, 1, 2, 3, 12, 0, 0, 0, 4,
-            100, 0, 0, 0, 1, 2, 3,
+            12, 0, 0, 0, 0, 100, 0, 0, 0, 1, 2, 3, // Debug
+            12, 0, 0, 0, 1, 100, 0, 0, 0, 1, 2, 3, // Ping
+            12, 0, 0, 0, 2, 100, 0, 0, 0, 1, 2, 3, // Exit
+            12, 0, 0, 0, 3, 100, 0, 0, 0, 1, 2, 3, // Recv
+            12, 0, 0, 0, 4, 100, 0, 0, 0, 1, 2, 3, // Send
+            12, 0, 0, 0, 5, 100, 0, 0, 0, 1, 2, 3, // Option
+            12, 0, 0, 0, 6, 100, 0, 0, 0, 1, 2, 3, // Debug
         ];
         let mut buf = BytesMut::from(data);
         let mut codec = PayloadCodec::new();
@@ -155,8 +173,9 @@ mod tests {
     #[test]
     fn decoder_gracefully_handles_partial_buffers() {
         let data: &[u8] = &[
-            15, 0, 0, 0, 0, 100, 0, 0, 0, 4, 5, 6, 7, 8, 9, 16, 0, 0, 0, 1, 101, 0, 0, 0, 4, 5, 6,
-            7, 8, 9, 10, 14, 0, 0, 0, 0,
+            15, 0, 0, 0, 0, 100, 0, 0, 0, 4, 5, 6, 7, 8, 9, // Payload 1
+            16, 0, 0, 0, 1, 101, 0, 0, 0, 4, 5, 6, 7, 8, 9, 10, // Payload 2
+            14, 0, 0, 0, 0, // Partial
         ];
         let mut buf = BytesMut::from(data);
         let mut codec = PayloadCodec::new();
