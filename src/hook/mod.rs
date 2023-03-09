@@ -14,10 +14,12 @@ use crate::rpc;
 
 mod packet;
 mod recv;
+mod send;
 mod waitgroup;
 
 pub struct State {
     recv_hook: recv::Hook,
+    send_hook: send::Hook,
     wg: waitgroup::WaitGroup,
     pub broadcast_rx: Arc<Mutex<mpsc::UnboundedReceiver<rpc::Payload>>>,
 }
@@ -44,7 +46,7 @@ impl Display for Channel {
 pub(self) enum HookError {
     #[error("failed to set up {0} hook")]
     SetupFailed(Channel),
-    #[error("number of signature matches is incorrect: {0} != {0}")]
+    #[error("number of signature matches is incorrect: {0} != {1}")]
     SignatureMatchFailed(usize, usize),
 }
 
@@ -55,6 +57,7 @@ impl State {
         let wg = waitgroup::WaitGroup::new();
         let hs = State {
             recv_hook: recv::Hook::new(broadcast_tx.clone(), wg.clone())?,
+            send_hook: send::Hook::new(broadcast_tx.clone(), wg.clone())?,
             wg,
             broadcast_rx: Arc::new(Mutex::new(broadcast_rx)),
         };
@@ -68,14 +71,28 @@ impl State {
         let handle_ffxiv = get_ffxiv_handle()?;
         let pe_view = unsafe { PeView::module(handle_ffxiv) };
 
-        let decompresspacket_rvas = find_pattern_matches("recv::DecompressPacket", sig, pe_view)
+        let rvas = find_pattern_matches("recv::DecompressPacket", sig, pe_view)
             .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
-        self.recv_hook.setup(decompresspacket_rvas)
+        self.recv_hook.setup(rvas)
+    }
+
+    pub fn initialize_send_hook(&self, sig_str: String) -> Result<()> {
+        let pat =
+            pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
+        let sig: &[pattern::Atom] = &pat;
+        let handle_ffxiv = get_ffxiv_handle()?;
+        let pe_view = unsafe { PeView::module(handle_ffxiv) };
+
+        let rvas = find_pattern_matches("recv::CompressPacket", sig, pe_view)
+            .map_err(|e| format_err!("{}: {}", e, sig_str))?;
+
+        self.send_hook.setup(rvas)
     }
 
     pub fn shutdown(&self) {
         self.recv_hook.shutdown();
+        self.send_hook.shutdown();
         // Wait for any hooks to finish what they're doing
         self.wg.wait();
     }

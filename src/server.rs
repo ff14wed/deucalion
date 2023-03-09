@@ -169,6 +169,7 @@ where
     let ack_prefix = {
         match payload.op {
             rpc::MessageOps::Recv => "RECV ",
+            rpc::MessageOps::Send => "SEND ",
             _ => "",
         }
     };
@@ -215,7 +216,12 @@ where
         } else {
             "RECV REQUIRES SIG."
         };
-        format!("SERVER HELLO. STATUS: {}", recv_status)
+        let send_status = if state.send_initialized {
+            "SEND INITIALIZED."
+        } else {
+            "SEND REQUIRES SIG."
+        };
+        format!("SERVER HELLO. STATUS: {} {}", recv_status, send_status)
     };
 
     frames

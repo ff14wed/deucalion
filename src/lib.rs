@@ -30,6 +30,7 @@ use log::{debug, error, info};
 use simplelog::{self, LevelFilter, SimpleLogger};
 
 const RECV_HOOK_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
+const SEND_HOOK_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     debug!("Received payload: {:?}", payload);
@@ -38,7 +39,14 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
             debug!("{:?}", payload);
         }
         rpc::MessageOps::Recv => {
-            if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data) {
+            if let Err(e) = parse_sig_and_initialize_recv_hook(hs, payload.data) {
+                let err = format_err!("error initializing hook: {:?}", e);
+                debug!("{:?}", err);
+                return Err(err);
+            }
+        }
+        rpc::MessageOps::Send => {
+            if let Err(e) = parse_sig_and_initialize_send_hook(hs, payload.data) {
                 let err = format_err!("error initializing hook: {:?}", e);
                 debug!("{:?}", err);
                 return Err(err);
@@ -49,9 +57,14 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     Ok(())
 }
 
-fn parse_sig_and_initialize_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
+fn parse_sig_and_initialize_recv_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
     let sig_str = String::from_utf8(data).context("Invalid string")?;
     hs.initialize_recv_hook(sig_str)
+}
+
+fn parse_sig_and_initialize_send_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
+    let sig_str = String::from_utf8(data).context("Invalid string")?;
+    hs.initialize_send_hook(sig_str)
 }
 
 #[tokio::main]
@@ -74,9 +87,18 @@ async fn main_with_result() -> Result<()> {
             }
         };
 
+        let initialized_send = {
+            if let Err(e) = hs_clone.initialize_send_hook(SEND_HOOK_SIG.into()) {
+                debug!("Could not auto-initialize the recv hook: {}", e);
+                false
+            } else {
+                true
+            }
+        };
+
         let mut s = state_clone.lock().await;
         s.set_recv_state(initialized_recv);
-        s.set_send_state(false);
+        s.set_send_state(initialized_send);
     });
 
     // Message loop that forwards messages from the hooks to the server task

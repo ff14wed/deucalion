@@ -5,24 +5,29 @@ use std::{env, time::Instant};
 
 use anyhow::{format_err, Context, Result};
 
+use log::info;
+use simplelog::{self, LevelFilter, SimpleLogger};
+
 fn main() {
+    SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default()).unwrap();
+
     let args: Vec<String> = env::args().collect();
     let target_exe_path = &args[1];
     let sig = &args[2];
-    println!("Searching for sig {} in file {}", sig, target_exe_path);
+    info!("Searching for sig {} in file {}", sig, target_exe_path);
 
     let image_map = ImageMap::open(target_exe_path).unwrap();
     let addrs = scan_sigs(image_map.as_ref(), &sig).unwrap();
-    println!("Found addresses:");
+    info!("Found addresses:");
     for addr in addrs {
-        println!("{:x}", addr);
+        info!("{:x}", addr);
     }
 }
 
 fn scan_sigs(image: &[u8], sig_str: &String) -> Result<Vec<usize>> {
     let start = Instant::now();
     let file = PeView::from_bytes(image)?;
-    println!("File load took {:?}", start.elapsed());
+    info!("File load took {:?}", start.elapsed());
 
     let start = Instant::now();
     let pat = pattern::parse(sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
@@ -31,7 +36,7 @@ fn scan_sigs(image: &[u8], sig_str: &String) -> Result<Vec<usize>> {
     let rvas = procloader::find_pattern_matches("", sig, file)
         .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
-    println!("Pattern search took {:?}", start.elapsed());
+    info!("Pattern search took {:?}", start.elapsed());
 
     Ok(rvas)
 }
