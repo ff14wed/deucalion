@@ -123,6 +123,10 @@ impl Hook {
         let ret = hook.get().expect(INVALID_MSG).call(a1, a2, a3, a4, a5);
 
         let ptr_frame: *const u8 = *(a1.add(16) as *const usize) as *const u8;
+        let offset: u32 = *(a1.add(28) as *const u32);
+        if offset != 0 {
+            return ret;
+        }
 
         match packet::extract_packets_from_frame(ptr_frame) {
             Ok(packets) => {
