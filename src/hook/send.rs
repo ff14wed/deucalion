@@ -101,13 +101,6 @@ impl Hook {
     ) -> usize {
         let _guard = self.wg.add();
 
-        const INVALID_MSG: &str = "Hook function was called without a valid hook";
-        let hook = match channel {
-            Channel::Chat => self.chat_hook.clone(),
-            Channel::Lobby => panic!("Not implemented."),
-            Channel::Zone => self.zone_hook.clone(),
-        };
-
         let ptr_frame: *const u8 = *(a1.add(16) as *const usize) as *const u8;
 
         match packet::extract_packets_from_frame(ptr_frame) {
@@ -124,6 +117,13 @@ impl Hook {
                 info!("Could not process packet: {}", e)
             }
         }
+
+        const INVALID_MSG: &str = "Hook function was called without a valid hook";
+        let hook = match channel {
+            Channel::Chat => self.chat_hook.clone(),
+            Channel::Lobby => panic!("Not implemented."),
+            Channel::Zone => self.zone_hook.clone(),
+        };
         return hook.get().expect(INVALID_MSG).call(a1, a2, a3, a4, a5, a6);
     }
 
