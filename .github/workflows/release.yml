@@ -1,7 +1,9 @@
 name: Build
 on:
   push:
-    branches: [ signing_test ]
+    tags:
+    - 0.*
+
 env:
   CARGO_TERM_COLOR: always
 
