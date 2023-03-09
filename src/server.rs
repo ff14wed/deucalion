@@ -197,6 +197,21 @@ where
     Ok(())
 }
 
+async fn server_hello_string(state: Arc<Mutex<Shared>>) -> String {
+    let state = state.lock().await;
+    let recv_status = if state.recv_initialized {
+        "RECV INITIALIZED."
+    } else {
+        "RECV REQUIRES SIG."
+    };
+    let send_status = if state.send_initialized {
+        "SEND INITIALIZED."
+    } else {
+        "SEND REQUIRES SIG."
+    };
+    format!("SERVER HELLO. STATUS: {} {}", recv_status, send_status)
+}
+
 /// Process an individual client
 async fn process<F>(
     state: Arc<Mutex<Shared>>,
@@ -209,20 +224,7 @@ where
     let codec = rpc::PayloadCodec::new();
     let mut frames = Framed::new(stream, codec);
 
-    let hello_string = {
-        let state = state.lock().await;
-        let recv_status = if state.recv_initialized {
-            "RECV INITIALIZED."
-        } else {
-            "RECV REQUIRES SIG."
-        };
-        let send_status = if state.send_initialized {
-            "SEND INITIALIZED."
-        } else {
-            "SEND REQUIRES SIG."
-        };
-        format!("SERVER HELLO. STATUS: {} {}", recv_status, send_status)
-    };
+    let hello_string = server_hello_string(state.clone()).await;
 
     frames
         .send(
@@ -336,10 +338,116 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::namedpipe;
+
     use super::*;
     use ntest::timeout;
     use rand::Rng;
-    use winapi::um::processthreadsapi;
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
+    async fn test_server_hello_message() {
+        let (signal_tx, _) = mpsc::channel(1);
+        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
+
+        let combinations = vec![
+            (
+                false,
+                false,
+                "SERVER HELLO. STATUS: RECV REQUIRES SIG. SEND REQUIRES SIG.",
+            ),
+            (
+                false,
+                true,
+                "SERVER HELLO. STATUS: RECV REQUIRES SIG. SEND INITIALIZED.",
+            ),
+            (
+                true,
+                false,
+                "SERVER HELLO. STATUS: RECV INITIALIZED. SEND REQUIRES SIG.",
+            ),
+            (
+                true,
+                true,
+                "SERVER HELLO. STATUS: RECV INITIALIZED. SEND INITIALIZED.",
+            ),
+        ];
+
+        for (recv_initialized, send_initialized, expected_hello) in combinations {
+            let state_clone = state.clone();
+            {
+                let mut state = state_clone.lock().await;
+                state.set_recv_state(recv_initialized);
+                state.set_send_state(send_initialized);
+            }
+
+            assert_eq!(
+                server_hello_string(state_clone).await,
+                expected_hello.to_string()
+            );
+        }
+    }
+
+    async fn peer_from_client(client: namedpipe::Connection) -> Peer<namedpipe::Connection> {
+        // Create a frame decoder that processes the client stream
+        let codec = rpc::PayloadCodec::new();
+        let frames = Framed::new(client, codec);
+        // This state isn't really used for anything
+        let (dummy_signal_tx, _) = mpsc::channel(1);
+        let dummy_state = Arc::new(Mutex::new(Shared::new(dummy_signal_tx)));
+        return Peer::new(dummy_state, frames).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
+    async fn test_server_shutdown() {
+        let (signal_tx, signal_rx) = mpsc::channel(1);
+        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
+
+        let test_id: u16 = rand::thread_rng().gen();
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
+        let pipe_name_clone = pipe_name.clone();
+
+        let server_task = tokio::spawn(async move {
+            if let Err(e) = run(pipe_name_clone, state, signal_rx, move |_: rpc::Payload| {
+                Ok(())
+            })
+            .await
+            {
+                panic!("Server should not fail to run: {:?}", e);
+            }
+        });
+
+        // Give the server some time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let client = Endpoint::connect(&pipe_name)
+            .await
+            .expect("Failed to connect client to server");
+
+        let mut peer = peer_from_client(client).await;
+
+        // Handle the SERVER_HELLO message
+        let peer_message = peer.next().await.unwrap();
+        if let Ok(Message::Request(payload)) = peer_message {
+            assert_eq!(payload.ctx, 9000);
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        // Send exit
+        peer.frames
+            .send(rpc::Payload {
+                op: rpc::MessageOps::Exit,
+                ctx: 0,
+                data: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        // Wait on the server to shut down
+        let _ = server_task.await;
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
@@ -348,8 +456,8 @@ mod tests {
         let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
         let state_clone = state.clone();
 
-        let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
-        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", pid);
+        let test_id: u16 = rand::thread_rng().gen();
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
         let pipe_name_clone = pipe_name.clone();
 
         tokio::spawn(async move {
@@ -369,13 +477,7 @@ mod tests {
             .await
             .expect("Failed to connect client to server");
 
-        // Create a frame decoder that processes the client stream
-        let codec = rpc::PayloadCodec::new();
-        let frames = Framed::new(client, codec);
-        // This state isn't really used for anything
-        let (dummy_signal_tx, _) = mpsc::channel(1);
-        let dummy_state = Arc::new(Mutex::new(Shared::new(dummy_signal_tx)));
-        let mut peer = Peer::new(dummy_state, frames).await.unwrap();
+        let mut peer = peer_from_client(client).await;
 
         // Handle the SERVER_HELLO message
         let peer_message = peer.next().await.unwrap();
