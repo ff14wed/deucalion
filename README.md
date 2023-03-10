@@ -190,19 +190,30 @@ but are not limited to:
   - The signature could not be found in memory.
   - The hook was already initialized.
 
-#### Example
+## Examples
 Here is an example interaction between Deucalion and a subscriber:
+
+Connecting to Deucalion will automatically allow traffic to start flowing
+to the subscriber.
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. STATUS: RECV REQUIRES SIG." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. STATUS: RECV INITIALIZED. SEND INITIALIZED." }
+// Deucalion: Data streamed to all subscribers
+Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
+...
+```
+
+### Example when Deucalion requires sigs
+```c
+// Deucalion: Connection established message.
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. STATUS: RECV REQUIRES SIG. SEND REQUIRES SIG." }
 // Subscriber: Request with an invalid sig.
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"invalid sig" }
 // Deucalion: Response with an invalid sig error.
 Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Invalid signature: \"invalid sig\"..." }
-// Subscriber: Request with a valid sig as of FFXIV global version 6.35. Note
-// that it is still possible to attempt to set up the hook again after an error
-// like an invalid sig.
+// Subscriber: Request with a valid sig (as of FFXIV global version 6.35).
+// Deucalion will gracefully allow subscribers to try again after an error.
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"E8 $ { ' } 4C 8B 43 10 41 8B 40 18" }
 // Deucalion: OK response
 Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"OK" }
@@ -210,12 +221,13 @@ Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"OK" }
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ```
 
-#### Example with a second subscriber
+### Example when attempting to reinitialize hook
 
 If the Recv hook is already initialized, then the following scenario can happen:
+
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO" }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. RECV INITIALIZED. SEND INITIALIZED." }
 // Deucalion: Data streamed to all subscribers
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 
@@ -228,6 +240,8 @@ Payload { OP: OP.Debug, CHANNEL: 1, DATA: u8"Error setting up hook: Detour is al
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment2 }
 ```
 
+If the hook has been partially initialized, then it may be necessary to
+recompile Deucalion with new sigs.
 
 ## Data Format
 
