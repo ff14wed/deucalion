@@ -79,32 +79,30 @@ async fn main_with_result() -> Result<()> {
     let (signal_tx, signal_rx) = mpsc::channel(1);
     let state = Arc::new(Mutex::new(server::Shared::new(signal_tx)));
 
-    // Asynchronously attempt to initialize the hooks
-    let hs_clone = hs.clone();
-    let state_clone = state.clone();
-    tokio::spawn(async move {
-        let initialized_recv = {
-            if let Err(e) = hs_clone.initialize_recv_hook(RECV_HOOK_SIG.into()) {
-                error!("Could not auto-initialize the recv hook: {}", e);
-                false
-            } else {
-                true
-            }
-        };
+    // Attempt to initialize the hooks
+    let initialized_recv = {
+        if let Err(e) = hs.initialize_recv_hook(RECV_HOOK_SIG.into()) {
+            error!("Could not auto-initialize the recv hook: {}", e);
+            false
+        } else {
+            true
+        }
+    };
 
-        let initialized_send = {
-            if let Err(e) = hs_clone.initialize_send_hook(SEND_HOOK_SIG.into()) {
-                error!("Could not auto-initialize the recv hook: {}", e);
-                false
-            } else {
-                true
-            }
-        };
+    let initialized_send = {
+        if let Err(e) = hs.initialize_send_hook(SEND_HOOK_SIG.into()) {
+            error!("Could not auto-initialize the recv hook: {}", e);
+            false
+        } else {
+            true
+        }
+    };
 
-        let mut s = state_clone.lock().await;
+    {
+        let mut s = state.lock().await;
         s.set_recv_state(initialized_recv);
         s.set_send_state(initialized_send);
-    });
+    }
 
     // Message loop that forwards messages from the hooks to the server task
     let hs_clone = hs.clone();
