@@ -384,8 +384,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::namedpipe;
-
     use super::*;
     use ntest::timeout;
     use rand::Rng;
@@ -455,16 +453,6 @@ mod tests {
         }
     }
 
-    async fn peer_from_client(client: namedpipe::Connection) -> Peer<namedpipe::Connection> {
-        // Create a frame decoder that processes the client stream
-        let codec = rpc::PayloadCodec::new();
-        let frames = Framed::new(client, codec);
-        // This state isn't really used for anything
-        let (dummy_signal_tx, _) = mpsc::channel(1);
-        let dummy_state = Arc::new(Mutex::new(Shared::new(dummy_signal_tx)));
-        return Peer::new(dummy_state, frames).await.unwrap();
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
     async fn test_combined_broadcast_filters() {
@@ -493,11 +481,12 @@ mod tests {
             .await
             .expect("Failed to connect client to server");
 
-        let mut peer = peer_from_client(client).await;
+        let codec = rpc::PayloadCodec::new();
+        let mut frames = Framed::new(client, codec);
 
         // Handle the SERVER_HELLO message
-        let peer_message = peer.next().await.unwrap();
-        if let Ok(Message::Request(payload)) = peer_message {
+        let peer_message = frames.next().await.unwrap();
+        if let Ok(payload) = peer_message {
             assert_eq!(payload.ctx, 9000);
         } else {
             panic!("Did not properly receive Server Hello");
@@ -508,7 +497,7 @@ mod tests {
             | BroadcastFilter::AllowZoneRecv as u32;
 
         // Send option
-        peer.frames
+        frames
             .send(rpc::Payload {
                 op: rpc::MessageOps::Option,
                 ctx: filter,
@@ -517,8 +506,8 @@ mod tests {
             .await
             .unwrap();
 
-        let peer_message = peer.next().await.unwrap();
-        if let Ok(Message::Request(payload)) = peer_message {
+        let peer_message = frames.next().await.unwrap();
+        if let Ok(payload) = peer_message {
             assert_eq!(payload.op, rpc::MessageOps::Debug);
             assert_eq!(
                 String::from_utf8(payload.data).unwrap(),
@@ -550,7 +539,7 @@ mod tests {
                 .await;
 
             select! {
-                payload = peer.next() => {
+                payload = frames.next() => {
                     assert_eq!(should_be_allowed, true, "packet should be filtered: {:?}", payload)
                 }
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
@@ -587,18 +576,19 @@ mod tests {
             .await
             .expect("Failed to connect client to server");
 
-        let mut peer = peer_from_client(client).await;
+        let codec = rpc::PayloadCodec::new();
+        let mut frames = Framed::new(client, codec);
 
         // Handle the SERVER_HELLO message
-        let peer_message = peer.next().await.unwrap();
-        if let Ok(Message::Request(payload)) = peer_message {
+        let peer_message = frames.next().await.unwrap();
+        if let Ok(payload) = peer_message {
             assert_eq!(payload.ctx, 9000);
         } else {
             panic!("Did not properly receive Server Hello");
         }
 
         // Send exit
-        peer.frames
+        frames
             .send(rpc::Payload {
                 op: rpc::MessageOps::Exit,
                 ctx: 0,
@@ -639,11 +629,12 @@ mod tests {
             .await
             .expect("Failed to connect client to server");
 
-        let mut peer = peer_from_client(client).await;
+        let codec = rpc::PayloadCodec::new();
+        let mut frames = Framed::new(client, codec);
 
         // Handle the SERVER_HELLO message
-        let peer_message = peer.next().await.unwrap();
-        if let Ok(Message::Request(payload)) = peer_message {
+        let peer_message = frames.next().await.unwrap();
+        if let Ok(payload) = peer_message {
             assert_eq!(payload.ctx, 9000);
         } else {
             panic!("Did not properly receive Server Hello");
@@ -668,10 +659,10 @@ mod tests {
 
         // Test that every packet was received in order
         let mut num_received = 0u32;
-        while let Some(result) = peer.next().await {
+        while let Some(result) = frames.next().await {
             match result {
                 // A request was received from the current user
-                Ok(Message::Request(payload)) => {
+                Ok(payload) => {
                     assert_eq!(
                         payload.ctx, num_received,
                         "Received data from pipe does not match expected index!"
