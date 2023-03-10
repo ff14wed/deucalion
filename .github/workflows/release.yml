@@ -38,13 +38,13 @@ jobs:
         cat deucalion.sha256sum.asc
 
     - name: Code Sign
-      uses: DanaBear/code-sign-action@v4
+      uses: dlemstra/code-sign-action@v1
       with:
         certificate: '${{ secrets.CODE_SIGN_CERTIFICATE }}'
         password: '${{ secrets.CODE_SIGN_PASSWORD }}'
-        certificatesha1: '${{ secrets.CODE_SIGN_THUMBPRINT }}'
-        folder: 'target/release'
-        recursive: true
+        recursive: false
+        files: |
+          target/release/deucalion.dll
 
     - name: Upload artifact
       uses: actions/upload-artifact@v3
