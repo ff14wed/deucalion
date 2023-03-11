@@ -294,6 +294,7 @@ impl Server {
                         subscriber.frames.send(ping_payload.clone()).await?;
                     }
                     rpc::MessageOps::Exit => {
+                        info!("Shutting down server because Exit payload received");
                         self.shutdown().await;
                         return Ok(());
                     }
@@ -322,7 +323,7 @@ impl Server {
                 }
                 Err(e) => {
                     error!(
-                        "an error occured while processing messages for subscriber {}; error = {:?}",
+                        "An error occured while processing messages for subscriber {}; error = {:?}",
                         subscriber.id, e
                     );
                 }
@@ -331,11 +332,12 @@ impl Server {
 
         // If this section is reached it means that the subscriber was disconnected!
         {
-            info!("subscriber disconnected: {}", subscriber.id);
+            info!("Subscriber disconnected: {}", subscriber.id);
             let mut state = self.state.lock().await;
             state.subscribers.remove(&subscriber.id);
             // Exit once all subscribers are disconnected
             if state.subscribers.len() == 0 {
+                info!("Shutting down server because last subscriber disconnected");
                 self.shutdown().await;
             }
         }
@@ -587,6 +589,47 @@ mod tests {
             })
             .await
             .unwrap();
+
+        // Wait on the server to shut down
+        let _ = server_task.await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
+    async fn test_subscriber_disconnect() {
+        let server = Server::new();
+
+        let test_id: u16 = rand::thread_rng().gen();
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
+        let pipe_name_clone = pipe_name.clone();
+
+        let server_task = tokio::spawn(async move {
+            server
+                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .await
+                .expect("Server should not fail to run");
+        });
+
+        // Give the server some time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let subscriber = Endpoint::connect(&pipe_name)
+            .await
+            .expect("Failed to connect subscriber to server");
+
+        let codec = rpc::PayloadCodec::new();
+        let mut frames = Framed::new(subscriber, codec);
+
+        // Handle the SERVER_HELLO message
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
+            assert_eq!(payload.ctx, 9000);
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        // Disconnect the subscriber forcefully
+        drop(frames);
 
         // Wait on the server to shut down
         let _ = server_task.await;
