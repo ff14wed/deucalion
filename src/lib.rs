@@ -106,7 +106,7 @@ async fn main_with_result() -> Result<()> {
     let hs_clone = hs.clone();
     let state_clone = state.clone();
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-    let msg_loop_future = tokio::spawn(async move {
+    let msg_loop_handle = tokio::spawn(async move {
         loop {
             let mut broadcast_rx = hs_clone.broadcast_rx.lock().await;
             select! {
@@ -139,9 +139,8 @@ async fn main_with_result() -> Result<()> {
 
     // Signal the msg loop to exit and shut down the hook
     drop(shutdown_tx);
-    msg_loop_future.await?;
-
     info!("Hook shutdown initiated...");
+    msg_loop_handle.await?;
     info!("Shut down!");
     Ok(())
 }
