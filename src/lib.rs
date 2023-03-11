@@ -43,34 +43,28 @@ const SEND_HOOK_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     info!("Received payload from subscriber: {:?}", payload);
-    match payload.op {
-        rpc::MessageOps::Recv => {
-            if let Err(e) = parse_sig_and_initialize_recv_hook(hs, payload.data) {
-                let err = format_err!("error initializing hook: {:?}", e);
-                error!("{:?}", err);
-                return Err(err);
-            }
+    if payload.op == rpc::MessageOps::Recv || payload.op == rpc::MessageOps::Send {
+        let direction = match payload.op {
+            rpc::MessageOps::Recv => hook::Direction::Recv,
+            rpc::MessageOps::Send => hook::Direction::Send,
+            _ => panic!("This case shouldn't be possible"),
+        };
+        if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data, direction) {
+            let err = format_err!("error initializing hook: {:?}", e);
+            error!("{:?}", err);
+            return Err(err);
         }
-        rpc::MessageOps::Send => {
-            if let Err(e) = parse_sig_and_initialize_send_hook(hs, payload.data) {
-                let err = format_err!("error initializing hook: {:?}", e);
-                error!("{:?}", err);
-                return Err(err);
-            }
-        }
-        _ => {}
-    };
+    }
     Ok(())
 }
 
-fn parse_sig_and_initialize_recv_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
+fn parse_sig_and_initialize_hook(
+    hs: Arc<hook::State>,
+    data: Vec<u8>,
+    direction: hook::Direction,
+) -> Result<()> {
     let sig_str = String::from_utf8(data).context("Invalid string")?;
-    hs.initialize_recv_hook(sig_str)
-}
-
-fn parse_sig_and_initialize_send_hook(hs: Arc<hook::State>, data: Vec<u8>) -> Result<()> {
-    let sig_str = String::from_utf8(data).context("Invalid string")?;
-    hs.initialize_send_hook(sig_str)
+    hs.initialize_hook(sig_str, direction)
 }
 
 #[tokio::main]
@@ -80,9 +74,10 @@ async fn main_with_result() -> Result<()> {
     let (signal_tx, signal_rx) = mpsc::channel(1);
     let state = Arc::new(Mutex::new(server::Shared::new(signal_tx)));
 
-    // Attempt to initialize the hooks
+    info!("Attempting to auto-initialize the hooks");
+
     let initialized_recv = {
-        if let Err(e) = hs.initialize_recv_hook(RECV_HOOK_SIG.into()) {
+        if let Err(e) = hs.initialize_hook(RECV_HOOK_SIG.into(), hook::Direction::Recv) {
             error!("Could not auto-initialize the recv hook: {}", e);
             false
         } else {
@@ -91,8 +86,8 @@ async fn main_with_result() -> Result<()> {
     };
 
     let initialized_send = {
-        if let Err(e) = hs.initialize_send_hook(SEND_HOOK_SIG.into()) {
-            error!("Could not auto-initialize the recv hook: {}", e);
+        if let Err(e) = hs.initialize_hook(SEND_HOOK_SIG.into(), hook::Direction::Send) {
+            error!("Could not auto-initialize the send hook: {}", e);
             false
         } else {
             true
@@ -104,6 +99,8 @@ async fn main_with_result() -> Result<()> {
         s.set_recv_state(initialized_recv);
         s.set_send_state(initialized_send);
     }
+
+    info!("Hooks initialized.");
 
     // Message loop that forwards messages from the hooks to the server task
     let hs_clone = hs.clone();
@@ -129,6 +126,7 @@ async fn main_with_result() -> Result<()> {
     let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
     let pipe_name = format!(r"\\.\pipe\deucalion-{}", pid as u32);
 
+    info!("Starting server on {}", pipe_name);
     // Block on server loop
     let hs_clone = hs.clone();
     if let Err(e) = server::run(pipe_name, state, signal_rx, move |payload: rpc::Payload| {

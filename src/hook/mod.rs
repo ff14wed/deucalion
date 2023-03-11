@@ -1,14 +1,17 @@
 use std::fmt::Display;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{format_err, Context, Result};
 use thiserror::Error;
 
 use tokio::sync::{mpsc, Mutex};
 
-use crate::procloader::{find_pattern_matches, get_ffxiv_filepath};
 use pelite::{pattern, pe::PeView, ImageMap};
 
+use log::info;
+
+use crate::procloader::{find_pattern_matches, get_ffxiv_filepath};
 use crate::rpc;
 
 mod packet;
@@ -21,6 +24,11 @@ pub struct State {
     send_hook: send::Hook,
     wg: waitgroup::WaitGroup,
     pub broadcast_rx: Arc<Mutex<mpsc::UnboundedReceiver<rpc::Payload>>>,
+}
+
+pub enum Direction {
+    Recv,
+    Send,
 }
 
 #[repr(u32)]
@@ -63,7 +71,7 @@ impl State {
         Ok(hs)
     }
 
-    pub fn initialize_recv_hook(&self, sig_str: String) -> Result<()> {
+    pub fn initialize_hook(&self, sig_str: String, direction: Direction) -> Result<()> {
         let pat =
             pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
         let sig: &[pattern::Atom] = &pat;
@@ -72,25 +80,20 @@ impl State {
         let image_map = ImageMap::open(&ffxiv_file_path).unwrap();
         let pe_image = PeView::from_bytes(image_map.as_ref())?;
 
-        let rvas = find_pattern_matches("recv::DecompressPacket", sig, pe_image)
+        let sig_name = match direction {
+            Direction::Recv => "RecvPacket",
+            Direction::Send => "SendPacket",
+        };
+        info!("Scanning for {} sig: `{}`", sig_name, sig_str);
+        let scan_start = Instant::now();
+        let rvas = find_pattern_matches(sig_name, sig, pe_image)
             .map_err(|e| format_err!("{}: {}", e, sig_str))?;
+        info!("Sig scan took {:?}", scan_start.elapsed());
 
-        self.recv_hook.setup(rvas)
-    }
-
-    pub fn initialize_send_hook(&self, sig_str: String) -> Result<()> {
-        let pat =
-            pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
-        let sig: &[pattern::Atom] = &pat;
-        let ffxiv_file_path = get_ffxiv_filepath()?;
-
-        let image_map = ImageMap::open(&ffxiv_file_path).unwrap();
-        let pe_image = PeView::from_bytes(image_map.as_ref())?;
-
-        let rvas = find_pattern_matches("recv::CompressPacket", sig, pe_image)
-            .map_err(|e| format_err!("{}: {}", e, sig_str))?;
-
-        self.send_hook.setup(rvas)
+        match direction {
+            Direction::Recv => self.recv_hook.setup(rvas),
+            Direction::Send => self.send_hook.setup(rvas),
+        }
     }
 
     pub fn shutdown(&self) {

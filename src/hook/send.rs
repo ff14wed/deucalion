@@ -18,7 +18,7 @@ use super::packet;
 use super::waitgroup;
 use super::{Channel, HookError};
 
-use log::info;
+use log::error;
 
 type HookedFunction =
     unsafe extern "system" fn(*const u8, *const u8, usize, usize, usize, usize) -> usize;
@@ -114,7 +114,7 @@ impl Hook {
                 }
             }
             Err(e) => {
-                info!("Could not process packet: {}", e)
+                error!("Could not process packet: {}", e)
             }
         }
 
