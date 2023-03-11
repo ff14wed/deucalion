@@ -3,20 +3,21 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use anyhow::{Error, Result};
+use anyhow::{format_err, Error, Result};
 
 use futures::{SinkExt, Stream, StreamExt};
 
-use crate::namedpipe::Endpoint;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::Framed;
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use once_cell::sync::OnceCell;
 
 use stream_cancel::Tripwire;
 
 use log::{error, info};
 
+use crate::namedpipe::Endpoint;
 use crate::rpc;
 
 /// Shorthand for the transmit half of the message channel.
@@ -25,22 +26,17 @@ type Tx = mpsc::UnboundedSender<rpc::Payload>;
 /// Shorthand for the receive half of the message channel.
 type Rx = mpsc::UnboundedReceiver<rpc::Payload>;
 
-/// Data that is shared between all peers in the server.
-///
-/// This is the set of `Tx` handles for all connected clients. Messages are
-/// broadcasted to all peers by iterating over the `peers` entries and sending a
-/// copy of the message on each `Tx`.
-pub struct Shared {
-    peers: HashMap<usize, Tx>,
-    counter: usize,
-    signal: mpsc::Sender<()>,
+#[derive(Debug)]
+enum Message {
+    /// A message that was sent from a subscriber to the server
+    Request(rpc::Payload),
 
-    recv_initialized: bool,
-    send_initialized: bool,
+    /// A message that should be sent to subscribers
+    Data(rpc::Payload),
 }
 
 /// The state for each connected client.
-struct Peer<T>
+struct Subscriber<T>
 where
     T: AsyncRead + AsyncWrite + std::marker::Unpin,
 {
@@ -58,79 +54,16 @@ where
     rx: Rx,
 }
 
-impl Shared {
-    pub fn new(signal: mpsc::Sender<()>) -> Self {
-        Shared {
-            peers: HashMap::new(),
-            counter: 0,
-            signal,
-
-            recv_initialized: false,
-            send_initialized: false,
-        }
-    }
-
-    fn claim_id(&mut self) -> usize {
-        let original = self.counter;
-        self.counter += 1;
-        return original;
-    }
-
-    pub fn set_recv_state(&mut self, initialized: bool) {
-        self.recv_initialized = initialized;
-    }
-
-    pub fn set_send_state(&mut self, initialized: bool) {
-        self.send_initialized = initialized;
-    }
-
-    pub async fn shutdown(&self) {
-        let signal_tx = self.signal.clone();
-        let _ = signal_tx.send(()).await;
-    }
-
-    pub async fn broadcast(&mut self, message: rpc::Payload) {
-        for peer in self.peers.iter_mut() {
-            let _ = peer.1.send(message.clone());
-        }
-    }
-}
-
-impl<T> Peer<T>
+/// Subscriber implements `Stream` in a way that polls both the broadcast `Rx`
+/// channel and the `Framed` channel for messages sent to the named pipe by
+/// a subscriber.
+/// A message is produced whenever an event is ready and yields `None` when
+/// the subscriber connection is closed.
+impl<T> Stream for Subscriber<T>
 where
     T: AsyncRead + AsyncWrite + std::marker::Unpin,
 {
-    async fn new(
-        state: Arc<Mutex<Shared>>,
-        frames: Framed<T, rpc::PayloadCodec>,
-    ) -> tokio::io::Result<Peer<T>> {
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        // Add an entry for this `Peer` in the shared state map.
-        let mut state = state.lock().await;
-        let id = state.claim_id();
-        state.peers.insert(id, tx);
-
-        Ok(Peer { id, frames, rx })
-    }
-}
-
-#[derive(Debug)]
-enum Message {
-    /// A message that was sent from a client to the server
-    Request(rpc::Payload),
-
-    /// A message that should be sent to clients
-    Data(rpc::Payload),
-}
-
-/// Peer implements `Stream` in a way that polls both the `Rx`, and `Framed` types.
-/// A message is produced whenever an event is ready until the `Framed` stream returns `None`.
-impl<T> Stream for Peer<T>
-where
-    T: AsyncRead + AsyncWrite + std::marker::Unpin,
-{
-    type Item = Result<Message, Error>;
+    type Item = Result<Message>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // First poll the `UnboundedReceiver`.
@@ -184,121 +117,190 @@ fn allow_broadcast(op: rpc::MessageOps, channel: u32, filter: u32) -> bool {
     }
 }
 
-/// Handle the client message and send a success/failure response back
-async fn handle_client_message<T, F>(
-    payload: rpc::Payload,
-    peer: &mut Peer<T>,
-    payload_handler: &F,
-) -> Result<(), Error>
-where
-    T: AsyncRead + AsyncWrite + std::marker::Unpin,
-    F: Fn(rpc::Payload) -> Result<(), Error>,
-{
-    let ctx = payload.ctx;
+/// Global state that the server keeps for all connected subscribers.
+///
+/// Messages are broadcasted to all subscribers by iterating over each `Tx`
+/// entries and sending a copy of the message.
+struct State {
+    subscribers: HashMap<usize, Tx>,
+    counter: usize,
+    recv_initialized: bool,
+    send_initialized: bool,
+}
 
-    let ack_prefix = {
-        match payload.op {
-            rpc::MessageOps::Recv => "RECV ",
-            rpc::MessageOps::Send => "SEND ",
-            _ => "",
-        }
-    };
+impl State {
+    fn claim_id(&mut self) -> usize {
+        let original = self.counter;
+        self.counter += 1;
+        return original;
+    }
 
-    match payload_handler(payload) {
-        Ok(()) => {
-            peer.frames
-                .send(rpc::Payload {
-                    op: rpc::MessageOps::Debug,
-                    ctx,
-                    data: format!("{}OK", ack_prefix).into_bytes(),
-                })
-                .await?
-        }
-        Err(e) => {
-            peer.frames
-                .send(rpc::Payload {
-                    op: rpc::MessageOps::Debug,
-                    ctx,
-                    data: format!("{}{}", ack_prefix, e).into_bytes(),
-                })
-                .await?
+    /// Adds a new subscriber to the server and returns the subscriber ID and a
+    /// `Rx` that can be used to receive messages from broadcasts
+    fn new_subscriber(&mut self) -> (usize, Rx) {
+        let id = self.claim_id();
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.subscribers.insert(id, tx);
+        (id, rx)
+    }
+
+    fn server_hello_string(&self) -> String {
+        let recv_status = if self.recv_initialized {
+            "RECV INITIALIZED."
+        } else {
+            "RECV REQUIRES SIG."
+        };
+        let send_status = if self.send_initialized {
+            "SEND INITIALIZED."
+        } else {
+            "SEND REQUIRES SIG."
+        };
+        format!("SERVER HELLO. STATUS: {} {}", recv_status, send_status)
+    }
+}
+
+#[derive(Clone)]
+pub struct Server {
+    state: Arc<Mutex<State>>,
+    shutdown_tx: OnceCell<mpsc::Sender<()>>,
+}
+
+impl Server {
+    pub fn new() -> Self {
+        Server {
+            state: Arc::new(Mutex::new(State {
+                subscribers: HashMap::new(),
+                counter: 0,
+                recv_initialized: false,
+                send_initialized: false,
+            })),
+            shutdown_tx: OnceCell::new(),
         }
     }
-    Ok(())
-}
 
-async fn server_hello_string(state: Arc<Mutex<Shared>>) -> String {
-    let state = state.lock().await;
-    let recv_status = if state.recv_initialized {
-        "RECV INITIALIZED."
-    } else {
-        "RECV REQUIRES SIG."
-    };
-    let send_status = if state.send_initialized {
-        "SEND INITIALIZED."
-    } else {
-        "SEND REQUIRES SIG."
-    };
-    format!("SERVER HELLO. STATUS: {} {}", recv_status, send_status)
-}
+    pub async fn set_hook_state(&self, recv_initialized: bool, send_initialized: bool) {
+        let mut state = self.state.lock().await;
+        state.recv_initialized = recv_initialized;
+        state.send_initialized = send_initialized;
+    }
 
-/// Process an individual client
-async fn process<F>(
-    state: Arc<Mutex<Shared>>,
-    stream: impl AsyncRead + AsyncWrite + std::marker::Unpin,
-    payload_handler: F,
-) -> Result<(), Error>
-where
-    F: Fn(rpc::Payload) -> Result<(), Error>,
-{
-    let codec = rpc::PayloadCodec::new();
-    let mut frames = Framed::new(stream, codec);
+    pub async fn shutdown(&self) {
+        let _ = self
+            .shutdown_tx
+            .get()
+            .expect("cannot shutdown before the server is run!")
+            .send(())
+            .await;
+    }
 
-    let hello_string = server_hello_string(state.clone()).await;
+    pub async fn broadcast(&self, message: rpc::Payload) {
+        let mut state = self.state.lock().await;
+        for subscriber in state.subscribers.iter_mut() {
+            let _ = subscriber.1.send(message.clone());
+        }
+    }
 
-    frames
-        .send(
-            rpc::Payload {
-                op: rpc::MessageOps::Debug,
-                ctx: 9000,
-                data: hello_string.into_bytes(),
+    /// Handle the message from subscriber and send a success/failure response back
+    async fn handle_subscriber_message<T, F>(
+        payload: rpc::Payload,
+        subscriber: &mut Subscriber<T>,
+        payload_handler: &F,
+    ) -> Result<()>
+    where
+        T: AsyncRead + AsyncWrite + std::marker::Unpin,
+        F: Fn(rpc::Payload) -> Result<()>,
+    {
+        let ctx = payload.ctx;
+
+        let ack_prefix = {
+            match payload.op {
+                rpc::MessageOps::Recv => "RECV ",
+                rpc::MessageOps::Send => "SEND ",
+                _ => "",
             }
-            .into(),
-        )
-        .await?;
+        };
 
-    // Register our peer with state
-    let mut peer = Peer::new(state.clone(), frames).await?;
+        match payload_handler(payload) {
+            Ok(()) => {
+                subscriber
+                    .frames
+                    .send(rpc::Payload {
+                        op: rpc::MessageOps::Debug,
+                        ctx,
+                        data: format!("{}OK", ack_prefix).into_bytes(),
+                    })
+                    .await?
+            }
+            Err(e) => {
+                subscriber
+                    .frames
+                    .send(rpc::Payload {
+                        op: rpc::MessageOps::Debug,
+                        ctx,
+                        data: format!("{}{}", ack_prefix, e).into_bytes(),
+                    })
+                    .await?
+            }
+        }
+        Ok(())
+    }
 
-    info!("New client connected: {}", peer.id);
+    /// Handle an individual subcriber
+    async fn handle_subscriber<F>(
+        &self,
+        stream: impl AsyncRead + AsyncWrite + std::marker::Unpin,
+        payload_handler: F,
+    ) -> Result<()>
+    where
+        F: Fn(rpc::Payload) -> Result<()>,
+    {
+        let codec = rpc::PayloadCodec::new();
+        let frames = Framed::new(stream, codec);
 
-    let ping_payload = rpc::Payload {
-        op: rpc::MessageOps::Ping,
-        ctx: 0,
-        data: Vec::new(),
-    };
+        let (id, rx) = self.state.lock().await.new_subscriber();
+        let hello_string = self.state.lock().await.server_hello_string();
 
-    // Default packet filter is AllowZoneRecv only
-    let mut filter: u32 = BroadcastFilter::AllowZoneRecv as u32;
+        let mut subscriber = Subscriber { id, frames, rx };
 
-    // Process incoming messages until our stream is exhausted by a disconnect.
-    while let Some(result) = peer.next().await {
-        match result {
-            // A request was received from the current user
-            Ok(Message::Request(payload)) => {
-                let state = state.lock().await;
+        subscriber
+            .frames
+            .send(
+                rpc::Payload {
+                    op: rpc::MessageOps::Debug,
+                    ctx: 9000,
+                    data: hello_string.into_bytes(),
+                }
+                .into(),
+            )
+            .await?;
 
-                match payload.op {
+        info!("New client connected: {}", subscriber.id);
+
+        let ping_payload = rpc::Payload {
+            op: rpc::MessageOps::Ping,
+            ctx: 0,
+            data: Vec::new(),
+        };
+
+        // Default packet filter is AllowZoneRecv only
+        let mut filter: u32 = BroadcastFilter::AllowZoneRecv as u32;
+
+        // Process incoming messages until our stream is exhausted by a disconnect.
+        while let Some(result) = subscriber.next().await {
+            match result {
+                // A request was received from the current user
+                Ok(Message::Request(payload)) => match payload.op {
                     rpc::MessageOps::Ping => {
-                        peer.frames.send(ping_payload.clone()).await?;
+                        subscriber.frames.send(ping_payload.clone()).await?;
                     }
                     rpc::MessageOps::Exit => {
-                        state.shutdown().await;
+                        self.shutdown().await;
                         return Ok(());
                     }
                     rpc::MessageOps::Option => {
                         filter = payload.ctx;
-                        peer.frames
+                        subscriber
+                            .frames
                             .send(rpc::Payload {
                                 op: rpc::MessageOps::Debug,
                                 ctx: 0,
@@ -307,79 +309,82 @@ where
                             .await?
                     }
                     _ => {
-                        handle_client_message(payload, &mut peer, &payload_handler).await?;
+                        Self::handle_subscriber_message(payload, &mut subscriber, &payload_handler)
+                            .await?;
+                    }
+                },
+
+                // A message was received from the broadcast.
+                Ok(Message::Data(payload)) => {
+                    if allow_broadcast(payload.op, payload.ctx, filter) {
+                        subscriber.frames.send(payload).await?;
                     }
                 }
-            }
-
-            // A message was received from the broadcast.
-            Ok(Message::Data(payload)) => {
-                if allow_broadcast(payload.op, payload.ctx, filter) {
-                    peer.frames.send(payload).await?;
+                Err(e) => {
+                    error!(
+                        "an error occured while processing messages for peer {}; error = {:?}",
+                        subscriber.id, e
+                    );
                 }
             }
-            Err(e) => {
-                error!(
-                    "an error occured while processing messages for peer {}; error = {:?}",
-                    peer.id, e
-                );
+        }
+
+        // If this section is reached it means that the client was disconnected!
+        {
+            info!("client disconnected: {}", subscriber.id);
+            let mut state = self.state.lock().await;
+            state.subscribers.remove(&subscriber.id);
+            // Exit once all clients are disconnected
+            if state.subscribers.len() == 0 {
+                self.shutdown().await;
             }
         }
+
+        Ok(())
     }
 
-    // If this section is reached it means that the client was disconnected!
+    pub async fn run<F>(&self, pipe_name: String, payload_handler: F) -> Result<()>
+    where
+        F: Fn(rpc::Payload) -> Result<(), Error> + Sync + Send + Clone + 'static,
     {
-        info!("client disconnected: {}", peer.id);
-        let mut state = state.lock().await;
-        state.peers.remove(&peer.id);
-        // Exit once all clients are disconnected
-        if state.peers.len() == 0 {
-            state.shutdown().await;
-        }
-    }
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+        self.shutdown_tx
+            .set(shutdown_tx)
+            .map_err(|_| format_err!("cannot run server more than once"))?;
 
-    Ok(())
-}
+        let (trigger, tripwire) = Tripwire::new();
 
-pub async fn run<F>(
-    pipe_name: String,
-    state: Arc<Mutex<Shared>>,
-    mut signal_rx: mpsc::Receiver<()>,
-    payload_handler: F,
-) -> Result<(), Error>
-where
-    F: Fn(rpc::Payload) -> Result<(), Error> + Sync + Send + Clone + 'static,
-{
-    let (trigger, tripwire) = Tripwire::new();
+        let endpoint = Endpoint::new(pipe_name);
 
-    let endpoint = Endpoint::new(pipe_name);
+        let incoming = endpoint.incoming()?.take_until(tripwire);
 
-    let incoming = endpoint.incoming()?.take_until(tripwire);
+        futures::pin_mut!(incoming);
 
-    futures::pin_mut!(incoming);
+        tokio::spawn(async move {
+            let _ = shutdown_rx.recv().await;
+            info!("Shutdown signal received");
+            trigger.cancel();
+        });
 
-    tokio::spawn(async move {
-        let _ = signal_rx.recv().await;
-        info!("Shutdown signal received");
-        trigger.cancel();
-    });
-
-    // Create a new process loop task for each client
-    while let Some(result) = incoming.next().await {
-        match result {
-            Ok(stream) => {
-                let state = state.clone();
-                let handler = payload_handler.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = process(state, stream, handler).await {
-                        error!("Error occurred when processing stream = {:?}", e);
-                    }
-                });
+        // Wait on subscribers and create a new loop task for each new
+        // connection
+        while let Some(result) = incoming.next().await {
+            match result {
+                Ok(stream) => {
+                    let handler = payload_handler.clone();
+                    let self_clone = self.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = self_clone.handle_subscriber(stream, handler).await {
+                            error!("Error occurred when processing stream = {:?}", e);
+                        }
+                    });
+                }
+                Err(e) => error!("Unable to connect to client: {}", e),
             }
-            Err(e) => error!("Unable to connect to client: {}", e),
         }
+        info!("Server shut down!");
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -412,8 +417,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
     async fn test_server_hello_message() {
-        let (signal_tx, _) = mpsc::channel(1);
-        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
+        let server = Server::new();
 
         let combinations = vec![
             (
@@ -439,15 +443,12 @@ mod tests {
         ];
 
         for (recv_initialized, send_initialized, expected_hello) in combinations {
-            let state_clone = state.clone();
-            {
-                let mut state = state_clone.lock().await;
-                state.set_recv_state(recv_initialized);
-                state.set_send_state(send_initialized);
-            }
+            server
+                .set_hook_state(recv_initialized, send_initialized)
+                .await;
 
             assert_eq!(
-                server_hello_string(state_clone).await,
+                server.state.lock().await.server_hello_string(),
                 expected_hello.to_string()
             );
         }
@@ -456,22 +457,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
     async fn test_combined_broadcast_filters() {
-        let (signal_tx, signal_rx) = mpsc::channel(1);
-        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
-        let state_clone = state.clone();
+        let server = Server::new();
 
         let test_id: u16 = rand::thread_rng().gen();
         let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
         let pipe_name_clone = pipe_name.clone();
 
+        let server_clone = server.clone();
         tokio::spawn(async move {
-            if let Err(e) = run(pipe_name_clone, state, signal_rx, move |_: rpc::Payload| {
-                Ok(())
-            })
-            .await
-            {
-                panic!("Server should not fail to run: {:?}", e);
-            }
+            server_clone
+                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .await
+                .expect("Server should not fail to run");
         });
 
         // Give the server some time to start
@@ -528,9 +525,7 @@ mod tests {
         ];
 
         for (op, ctx, should_be_allowed) in configurations {
-            state_clone
-                .lock()
-                .await
+            server
                 .broadcast(rpc::Payload {
                     op,
                     ctx,
@@ -552,21 +547,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
     async fn test_server_shutdown() {
-        let (signal_tx, signal_rx) = mpsc::channel(1);
-        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
+        let server = Server::new();
 
         let test_id: u16 = rand::thread_rng().gen();
         let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
         let pipe_name_clone = pipe_name.clone();
 
         let server_task = tokio::spawn(async move {
-            if let Err(e) = run(pipe_name_clone, state, signal_rx, move |_: rpc::Payload| {
-                Ok(())
-            })
-            .await
-            {
-                panic!("Server should not fail to run: {:?}", e);
-            }
+            server
+                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .await
+                .expect("Server should not fail to run");
         });
 
         // Give the server some time to start
@@ -604,22 +595,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
     async fn named_pipe_load_test() {
-        let (signal_tx, signal_rx) = mpsc::channel(1);
-        let state = Arc::new(Mutex::new(Shared::new(signal_tx)));
-        let state_clone = state.clone();
+        let server = Server::new();
 
         let test_id: u16 = rand::thread_rng().gen();
         let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
         let pipe_name_clone = pipe_name.clone();
 
+        let server_clone = server.clone();
         tokio::spawn(async move {
-            if let Err(e) = run(pipe_name_clone, state, signal_rx, move |_: rpc::Payload| {
-                Ok(())
-            })
-            .await
-            {
-                panic!("Server should not fail to run: {:?}", e);
-            }
+            server_clone
+                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .await
+                .expect("Server should not fail to run");
         });
 
         // Give the server some time to start
@@ -646,9 +633,7 @@ mod tests {
             let mut dummy_data = Vec::from([0u8; 5000]);
             rand::thread_rng().fill(&mut dummy_data[..]);
 
-            state_clone
-                .lock()
-                .await
+            server
                 .broadcast(rpc::Payload {
                     op: rpc::MessageOps::Debug,
                     ctx: i,

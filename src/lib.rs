@@ -21,7 +21,7 @@ use std::sync::Arc;
 use anyhow::{format_err, Context, Result};
 
 use tokio::select;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::oneshot;
 
 use dirs;
 
@@ -70,13 +70,11 @@ fn parse_sig_and_initialize_hook(
 #[tokio::main]
 async fn main_with_result() -> Result<()> {
     let hs = Arc::new(hook::State::new().context("error setting up the hook")?);
-
-    let (signal_tx, signal_rx) = mpsc::channel(1);
-    let state = Arc::new(Mutex::new(server::Shared::new(signal_tx)));
+    let deucalion_server = server::Server::new();
 
     info!("Attempting to auto-initialize the hooks");
 
-    let initialized_recv = {
+    let recv_initialized = {
         if let Err(e) = hs.initialize_hook(RECV_HOOK_SIG.into(), hook::Direction::Recv) {
             error!("Could not auto-initialize the recv hook: {}", e);
             false
@@ -85,7 +83,7 @@ async fn main_with_result() -> Result<()> {
         }
     };
 
-    let initialized_send = {
+    let send_initialized = {
         if let Err(e) = hs.initialize_hook(SEND_HOOK_SIG.into(), hook::Direction::Send) {
             error!("Could not auto-initialize the send hook: {}", e);
             false
@@ -94,25 +92,26 @@ async fn main_with_result() -> Result<()> {
         }
     };
 
-    {
-        let mut s = state.lock().await;
-        s.set_recv_state(initialized_recv);
-        s.set_send_state(initialized_send);
-    }
-
+    deucalion_server
+        .set_hook_state(recv_initialized, send_initialized)
+        .await;
     info!("Hooks initialized.");
 
-    // Message loop that forwards messages from the hooks to the server task
+    // Clone references to hook state and server state so that they can
+    // be moved into an async task
     let hs_clone = hs.clone();
-    let state_clone = state.clone();
+    let deucalion_server_clone = deucalion_server.clone();
+
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+
+    // Message loop that forwards messages from the hooks to the server task
     let msg_loop_handle = tokio::spawn(async move {
         loop {
             let mut broadcast_rx = hs_clone.broadcast_rx.lock().await;
             select! {
                 res = broadcast_rx.recv() => {
                     if let Some(payload) = res {
-                        state_clone.lock().await.broadcast(payload).await;
+                        deucalion_server_clone.broadcast(payload).await;
                     }
                 },
                 _ = &mut shutdown_rx => {
@@ -129,10 +128,11 @@ async fn main_with_result() -> Result<()> {
     info!("Starting server on {}", pipe_name);
     // Block on server loop
     let hs_clone = hs.clone();
-    if let Err(e) = server::run(pipe_name, state, signal_rx, move |payload: rpc::Payload| {
-        handle_payload(payload, hs_clone.clone())
-    })
-    .await
+    if let Err(e) = deucalion_server
+        .run(pipe_name, move |payload: rpc::Payload| {
+            handle_payload(payload, hs_clone.clone())
+        })
+        .await
     {
         error!("Server encountered error running: {:?}", e)
     }
