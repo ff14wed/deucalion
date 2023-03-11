@@ -17,13 +17,13 @@ async fn main() {
 }
 
 async fn signal_pipe(pipe_name: &String) {
-    let client = Endpoint::connect(pipe_name)
+    let subscriber = Endpoint::connect(pipe_name)
         .await
-        .expect("Failed to connect client to server");
+        .expect("Failed to connect subscriber to server");
 
-    // Create a frame decoder that processes the client stream
+    // Create a frame decoder that processes the subscriber stream
     let codec = rpc::PayloadCodec::new();
-    let mut frames = Framed::new(client, codec);
+    let mut frames = Framed::new(subscriber, codec);
 
     // Handle the SERVER_HELLO message
     let peer_message = frames.next().await.unwrap();

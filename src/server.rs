@@ -35,7 +35,7 @@ enum Message {
     Data(rpc::Payload),
 }
 
-/// The state for each connected client.
+/// The state for each connected subscriber.
 struct Subscriber<T>
 where
     T: AsyncRead + AsyncWrite + std::marker::Unpin,
@@ -245,7 +245,7 @@ impl Server {
         Ok(())
     }
 
-    /// Handle an individual subcriber
+    /// Handle an individual subscriber
     async fn handle_subscriber<F>(
         &self,
         stream: impl AsyncRead + AsyncWrite + std::marker::Unpin,
@@ -274,7 +274,7 @@ impl Server {
             )
             .await?;
 
-        info!("New client connected: {}", subscriber.id);
+        info!("New subscriber connected: {}", subscriber.id);
 
         let ping_payload = rpc::Payload {
             op: rpc::MessageOps::Ping,
@@ -322,19 +322,19 @@ impl Server {
                 }
                 Err(e) => {
                     error!(
-                        "an error occured while processing messages for peer {}; error = {:?}",
+                        "an error occured while processing messages for subscriber {}; error = {:?}",
                         subscriber.id, e
                     );
                 }
             }
         }
 
-        // If this section is reached it means that the client was disconnected!
+        // If this section is reached it means that the subscriber was disconnected!
         {
-            info!("client disconnected: {}", subscriber.id);
+            info!("subscriber disconnected: {}", subscriber.id);
             let mut state = self.state.lock().await;
             state.subscribers.remove(&subscriber.id);
-            // Exit once all clients are disconnected
+            // Exit once all subscribers are disconnected
             if state.subscribers.len() == 0 {
                 self.shutdown().await;
             }
@@ -379,7 +379,7 @@ impl Server {
                         }
                     });
                 }
-                Err(e) => error!("Unable to connect to client: {}", e),
+                Err(e) => error!("Unable to connect to subscriber: {}", e),
             }
         }
         info!("Server shut down!");
@@ -474,16 +474,16 @@ mod tests {
         // Give the server some time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let client = Endpoint::connect(&pipe_name)
+        let subscriber = Endpoint::connect(&pipe_name)
             .await
-            .expect("Failed to connect client to server");
+            .expect("Failed to connect subscriber to server");
 
         let codec = rpc::PayloadCodec::new();
-        let mut frames = Framed::new(client, codec);
+        let mut frames = Framed::new(subscriber, codec);
 
         // Handle the SERVER_HELLO message
-        let peer_message = frames.next().await.unwrap();
-        if let Ok(payload) = peer_message {
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
             assert_eq!(payload.ctx, 9000);
         } else {
             panic!("Did not properly receive Server Hello");
@@ -503,8 +503,8 @@ mod tests {
             .await
             .unwrap();
 
-        let peer_message = frames.next().await.unwrap();
-        if let Ok(payload) = peer_message {
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
             assert_eq!(payload.op, rpc::MessageOps::Debug);
             assert_eq!(
                 String::from_utf8(payload.data).unwrap(),
@@ -563,16 +563,16 @@ mod tests {
         // Give the server some time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let client = Endpoint::connect(&pipe_name)
+        let subscriber = Endpoint::connect(&pipe_name)
             .await
-            .expect("Failed to connect client to server");
+            .expect("Failed to connect subscriber to server");
 
         let codec = rpc::PayloadCodec::new();
-        let mut frames = Framed::new(client, codec);
+        let mut frames = Framed::new(subscriber, codec);
 
         // Handle the SERVER_HELLO message
-        let peer_message = frames.next().await.unwrap();
-        if let Ok(payload) = peer_message {
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
             assert_eq!(payload.ctx, 9000);
         } else {
             panic!("Did not properly receive Server Hello");
@@ -612,22 +612,22 @@ mod tests {
         // Give the server some time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let client = Endpoint::connect(&pipe_name)
+        let subscriber = Endpoint::connect(&pipe_name)
             .await
-            .expect("Failed to connect client to server");
+            .expect("Failed to connect subscriber to server");
 
         let codec = rpc::PayloadCodec::new();
-        let mut frames = Framed::new(client, codec);
+        let mut frames = Framed::new(subscriber, codec);
 
         // Handle the SERVER_HELLO message
-        let peer_message = frames.next().await.unwrap();
-        if let Ok(payload) = peer_message {
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
             assert_eq!(payload.ctx, 9000);
         } else {
             panic!("Did not properly receive Server Hello");
         }
 
-        // Synchronously send many packets before the client can process them
+        // Synchronously send many packets before the subscriber can process them
         const NUM_PACKETS: u32 = 10000;
         for i in 0..NUM_PACKETS {
             let mut dummy_data = Vec::from([0u8; 5000]);
