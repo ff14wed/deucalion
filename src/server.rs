@@ -536,8 +536,8 @@ mod tests {
                 .await;
 
             select! {
-                payload = frames.next() => {
-                    assert_eq!(should_be_allowed, true, "packet should be filtered: {:?}", payload)
+                data = frames.next() => {
+                    assert_eq!(should_be_allowed, true, "packet should be filtered: {:?}", data)
                 }
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
                     assert_eq!(should_be_allowed, false, "packet should not be filtered: {:?}: {}", op, ctx)
@@ -637,6 +637,87 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[timeout(10_000)]
+    async fn test_second_subscriber_disconnect() {
+        let server = Server::new();
+
+        let test_id: u16 = rand::thread_rng().gen();
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
+        let pipe_name_clone = pipe_name.clone();
+
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            server_clone
+                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .await
+                .expect("Server should not fail to run");
+        });
+
+        // Give the server some time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let subscriber = Endpoint::connect(&pipe_name)
+            .await
+            .expect("Failed to connect subscriber to server");
+
+        let codec = rpc::PayloadCodec::new();
+        let mut frames = Framed::new(subscriber, codec);
+
+        // Handle the SERVER_HELLO message
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
+            assert_eq!(payload.ctx, 9000);
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        // Create and quickly drop the second connection
+        {
+            let subscriber2 = Endpoint::connect(&pipe_name)
+                .await
+                .expect("Failed to connect subscriber to server");
+
+            let codec2 = rpc::PayloadCodec::new();
+            let _frames2 = Framed::new(subscriber2, codec2);
+        }
+
+        // Send two packets
+        for i in 0..2 {
+            let mut dummy_data = Vec::from([0u8; 5000]);
+            rand::thread_rng().fill(&mut dummy_data[..]);
+
+            server
+                .broadcast(rpc::Payload {
+                    op: rpc::MessageOps::Debug,
+                    ctx: i,
+                    data: dummy_data,
+                })
+                .await;
+        }
+
+        let mut num_received = 0u32;
+        // Test that every packet was received in order
+        loop {
+            select! {
+                data = frames.next() => {
+                    let payload = data.expect("Expected data from frames!").unwrap();
+                    assert_eq!(
+                        payload.ctx, num_received,
+                        "Received data from pipe does not match expected index!"
+                    );
+                    num_received += 1;
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    assert_eq!(num_received, 2, "two packets should be received");
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A test to ensure the named pipe can handle a lot of data sent through
+    /// the pipe before the subscriber can process it.
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
     async fn named_pipe_load_test() {
         let server = Server::new();
 
@@ -701,6 +782,83 @@ mod tests {
                     }
                 }
                 _ => (),
+            }
+        }
+    }
+
+    /// A test to ensure the server remains stable even when creating and
+    /// dropping many subscriber connections
+    #[tokio::test(flavor = "multi_thread")]
+    #[timeout(10_000)]
+    async fn early_disconnection_stress_test() {
+        let server = Server::new();
+
+        let test_id: u16 = rand::thread_rng().gen();
+        let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
+        let pipe_name_clone = pipe_name.clone();
+
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            server_clone
+                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .await
+                .expect("Server should not fail to run");
+        });
+
+        // Create and quickly drop these connections
+        for _ in 0..100 {
+            // If the subscriber couldn't connect it's okay
+            if let Ok(subscriber) = Endpoint::connect(&pipe_name).await {
+                let codec = rpc::PayloadCodec::new();
+                let _frames = Framed::new(subscriber, codec);
+            }
+        }
+
+        let subscriber = Endpoint::connect(&pipe_name)
+            .await
+            .expect("Failed to connect subscriber to server");
+
+        let codec = rpc::PayloadCodec::new();
+        let mut frames = Framed::new(subscriber, codec);
+
+        // Handle the SERVER_HELLO message
+        let message = frames.next().await.unwrap();
+        if let Ok(payload) = message {
+            assert_eq!(payload.ctx, 9000);
+        } else {
+            panic!("Did not properly receive Server Hello");
+        }
+
+        // Send two packets
+        for i in 0..2 {
+            let mut dummy_data = Vec::from([0u8; 5000]);
+            rand::thread_rng().fill(&mut dummy_data[..]);
+
+            server
+                .broadcast(rpc::Payload {
+                    op: rpc::MessageOps::Debug,
+                    ctx: i,
+                    data: dummy_data,
+                })
+                .await;
+        }
+
+        let mut num_received = 0u32;
+        // Test that every packet was received in order
+        loop {
+            select! {
+                data = frames.next() => {
+                    let payload = data.expect("Expected data from frames!").unwrap();
+                    assert_eq!(
+                        payload.ctx, num_received,
+                        "Received data from pipe does not match expected index!"
+                    );
+                    num_received += 1;
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    assert_eq!(num_received, 2, "two packets should be received");
+                    return;
+                }
             }
         }
     }
