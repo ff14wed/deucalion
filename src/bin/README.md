@@ -12,3 +12,13 @@ Example usage:
 ```bash
 cargo run --bin find_sig_matches "C:\path\to\file.exe" "E8 $ { ' } ? ? ? ?"
 ```
+
+## signal_exit
+
+Given a process ID, signals Deucalion to exit if it is running in the target
+process. WARNING: This will break applications that use Deucalion!
+
+Example usage:
+```bash
+cargo run --bin signal_exit 12345
+```

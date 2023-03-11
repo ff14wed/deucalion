@@ -26,11 +26,12 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use dirs;
 
 mod hook;
-mod namedpipe;
-mod rpc;
-mod server;
 
+pub mod namedpipe;
 pub mod procloader;
+pub mod rpc;
+
+mod server;
 
 use log::{error, info};
 

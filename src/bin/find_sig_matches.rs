@@ -12,6 +12,10 @@ fn main() {
     SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default()).unwrap();
 
     let args: Vec<String> = env::args().collect();
+    if args.len() != 3 {
+        panic!("2 positional args are required. See usage in the README.")
+    }
+
     let target_exe_path = &args[1];
     let sig = &args[2];
     info!("Searching for sig {} in file {}", sig, target_exe_path);
