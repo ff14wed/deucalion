@@ -68,14 +68,17 @@ This is the total length of the entire payload, including the length bytes.
 
 ### OP Types
 
-| OP  | Name   | Description                                                                                                                       |
-| --- | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | Debug  | Used for passing debug text messages.                                                                                             |
-| 1   | Ping   | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
-| 2   | Exit   | Used to signal Deucalion to unload itself from the host process. In most use cases, you will not need to send this op at all.     |
-| 3   | Recv   | When sent from Deucalion, contains the FFXIV packet received by the host process.                                                 |
-| 4   | Send   | When sent from Deucalion, contains the FFXIV packet sent by the host process.                                                     |
-| 5   | Option | Used to configure per-subscriber filtering for packets.                                                                           |
+| OP  | Name      | Description                                                                                                                       |
+| --- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Debug     | Used for passing debug text messages.                                                                                             |
+| 1   | Ping      | Used to maintain a connection between the subscriber and Deucalion. Deucalion will echo the same payload when it receives a ping. |
+| 2   | Exit      | Used to signal Deucalion to unload itself from the host process. In most use cases, you will not need to send this OP at all.     |
+| 3   | Recv      | When sent from Deucalion, contains the FFXIV IPC packet received by the host process.                                             |
+| 4   | Send      | When sent from Deucalion, contains the FFXIV IPC packet sent by the host process.                                                 |
+| 5   | Option    | Used to configure per-subscriber filtering for packets.                                                                           |
+| 6   | RecvOther | When sent from Deucalion, contains the FFXIV non-IPC segment received by the host process.                                        |
+| 7   | SendOther | When sent from Deucalion, contains the FFXIV non-IPC segment sent by the host process.                                            |
+
 
 ### Channel
 
@@ -95,10 +98,15 @@ types:
 
 For payloads with OP `Debug`, the payload is simply debug-logged.
 
-For payloads with OP `Recv` or `Send`, the data is the FFXIV packet sent by the
-host process. The packets are already in the correct order, but they still need
-to be decoded by your application. See [Data Format](#data-format) for more
-information on how to handle this data.
+For payloads with OP `Recv` or `Send`, the data is the FFXIV IPC packet captured
+from the host process. The packets are already in the correct order, but they
+still need to be decoded by your application. See [Data Format](#data-format)
+for more information on how to handle this data.
+
+Payloads with OP `RecvOther` or `SendOther` will contain FFXIV non-IPC segments
+captured from the host process. This is also discussed in
+[Data Format](#data-format).
+
 
 ## Subscriber Protocol
 
@@ -145,7 +153,12 @@ https://docs.rs/pelite/latest/pelite/pattern/fn.parse.html.
 
 ### Send OP
 
-What applies to `Recv` OP payloads also applies to `Send` OP payloads.
+What applies to `Recv` OP payloads sent from subscribers also applies to `Send`
+OP payloads sent from subscribers.
+
+However, payloads with CHANNEL set to `0` will initialize the `SendLobbyPacket`
+hook.  Payloads with any other CHANNEL value will initialize the `SendPacket`
+hook (handles Chat and Zone.)
 
 ### Option OP
 
@@ -158,15 +171,15 @@ this filter.
 
 Filters can be set by sending an `Option` OP with bitflags as the CHANNEL.
 
-| Flag   | Description                                          |
-| ------ | ---------------------------------------------------- |
-| 1 << 0 | Allows received Lobby packets.                       |
-| 1 << 1 | Allows received Zone packets.                        |
-| 1 << 2 | Allows received Chat packets.                        |
-| 1 << 3 | Allows sent Lobby packets.                           |
-| 1 << 4 | Allows sent Zone packets.                            |
-| 1 << 5 | Allows sent Chat packets.                            |
-| 1 << 6 | Allows other channels. Currently used for debugging. |
+| Flag   | Description                            |
+| ------ | -------------------------------------- |
+| 1 << 0 | Allows received Lobby packets.         |
+| 1 << 1 | Allows received Zone packets.          |
+| 1 << 2 | Allows received Chat packets.          |
+| 1 << 3 | Allows sent Lobby packets.             |
+| 1 << 4 | Allows sent Zone packets.              |
+| 1 << 5 | Allows sent Chat packets.              |
+| 1 << 6 | Allows other packet types or channels. |
 
 For example, to allow received Zone, received Chat, sent Zone, and sent Chat
 packets, you can compute the filter value:
@@ -198,7 +211,7 @@ to the subscriber.
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. STATUS: RECV INITIALIZED. SEND INITIALIZED." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. HOOK STATUS: RECV ON. SEND ON. SEND_LOBBY ON." }
 // Deucalion: Data streamed to all subscribers
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ...
@@ -207,7 +220,7 @@ Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ### Example when Deucalion requires sigs
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. STATUS: RECV REQUIRES SIG. SEND REQUIRES SIG." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. HOOK STATUS: RECV OFF. SEND OFF. SEND_LOBBY OFF." }
 // Subscriber: Request with an invalid sig.
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"invalid sig" }
 // Deucalion: Response with an invalid sig error.
@@ -227,7 +240,7 @@ If the Recv hook is already initialized, then the following scenario can happen:
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. RECV INITIALIZED. SEND INITIALIZED." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. RECV ON. SEND ON. SEND_LOBBY ON." }
 // Deucalion: Data streamed to all subscribers
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 
@@ -245,7 +258,7 @@ recompile Deucalion with new sigs.
 
 ## Data Format
 
-Data broadcasted with the `Recv` OP is sent to all subscribers in a
+Data broadcasted with the `Recv` or `Send` OP is sent to subscribers in a
 Deucalion-specific format:
 
 ```c
@@ -257,6 +270,18 @@ struct DEUCALION_SEGMENT {
   uint8_t packet_data[];
 }
 ```
+
+Data broadcasted with the `RecvOther` or `SendOther` OP is sent to subscribers
+as a plain FFXIV segment:
+
+```c
+struct FFXIV_SEGMENT {
+  FFXIVARR_PACKET_SEGMENT_HEADER segment_header;
+  uint8_t segment_data[];
+}
+```
+
+Refer to https://xiv.dev/network/packet-structure for more info.
 
 ### Details
 
