@@ -11,6 +11,8 @@ pub enum MessageOps {
     Recv,
     Send,
     Option,
+    RecvOther,
+    SendOther,
 }
 
 impl From<u8> for MessageOps {
@@ -22,6 +24,8 @@ impl From<u8> for MessageOps {
             3 => MessageOps::Recv,
             4 => MessageOps::Send,
             5 => MessageOps::Option,
+            6 => MessageOps::RecvOther,
+            7 => MessageOps::SendOther,
             _ => MessageOps::Debug,
         }
     }
@@ -128,6 +132,16 @@ mod tests {
                 data: vec![1, 2, 3],
             },
             Payload {
+                op: MessageOps::RecvOther,
+                ctx: 100,
+                data: vec![1, 2, 3],
+            },
+            Payload {
+                op: MessageOps::SendOther,
+                ctx: 100,
+                data: vec![1, 2, 3],
+            },
+            Payload {
                 op: MessageOps::Debug,
                 ctx: 100,
                 data: vec![1, 2, 3],
@@ -158,7 +172,9 @@ mod tests {
             12, 0, 0, 0, 3, 100, 0, 0, 0, 1, 2, 3, // Recv
             12, 0, 0, 0, 4, 100, 0, 0, 0, 1, 2, 3, // Send
             12, 0, 0, 0, 5, 100, 0, 0, 0, 1, 2, 3, // Option
-            12, 0, 0, 0, 6, 100, 0, 0, 0, 1, 2, 3, // Debug
+            12, 0, 0, 0, 6, 100, 0, 0, 0, 1, 2, 3, // RecvOther
+            12, 0, 0, 0, 7, 100, 0, 0, 0, 1, 2, 3, // SendOther
+            12, 0, 0, 0, 8, 100, 0, 0, 0, 1, 2, 3, // Catch-all debug
         ];
         let mut buf = BytesMut::from(data);
         let mut codec = PayloadCodec::new();

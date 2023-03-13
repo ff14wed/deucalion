@@ -113,6 +113,8 @@ fn allow_broadcast(op: rpc::MessageOps, channel: u32, filter: u32) -> bool {
             2 => (filter & BroadcastFilter::AllowChatSend as u32) > 0,
             _ => (filter & BroadcastFilter::AllowOther as u32) > 0,
         },
+        rpc::MessageOps::RecvOther => (filter & BroadcastFilter::AllowOther as u32) > 0,
+        rpc::MessageOps::SendOther => (filter & BroadcastFilter::AllowOther as u32) > 0,
         // All other message ops are always allowed
         _ => true,
     }
@@ -453,6 +455,8 @@ mod tests {
             (BroadcastFilter::AllowZoneSend, rpc::MessageOps::Send, 1),
             (BroadcastFilter::AllowChatSend, rpc::MessageOps::Send, 2),
             (BroadcastFilter::AllowOther, rpc::MessageOps::Recv, 100),
+            (BroadcastFilter::AllowOther, rpc::MessageOps::RecvOther, 0),
+            (BroadcastFilter::AllowOther, rpc::MessageOps::SendOther, 0),
         ];
         const ALLOW_EVERYTHING: u32 = 0xFF;
         for (filter, op, ctx) in configurations {

@@ -106,11 +106,19 @@ impl Hook {
         match packet::extract_packets_from_frame(ptr_frame) {
             Ok(packets) => {
                 for packet in packets {
-                    let _ = self.data_tx.send(rpc::Payload {
-                        op: rpc::MessageOps::Send,
-                        ctx: channel as u32,
-                        data: packet,
-                    });
+                    let payload = match packet {
+                        packet::Packet::IPC(data) => rpc::Payload {
+                            op: rpc::MessageOps::Send,
+                            ctx: channel as u32,
+                            data,
+                        },
+                        packet::Packet::Other(data) => rpc::Payload {
+                            op: rpc::MessageOps::SendOther,
+                            ctx: channel as u32,
+                            data,
+                        },
+                    };
+                    let _ = self.data_tx.send(payload);
                 }
             }
             Err(e) => {

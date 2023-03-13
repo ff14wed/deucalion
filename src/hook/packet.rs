@@ -53,9 +53,14 @@ define_layout!(deucalion_segment, LittleEndian, {
   data: [u8],
 });
 
+pub(super) enum Packet {
+    IPC(Vec<u8>),
+    Other(Vec<u8>),
+}
+
 /// Extract packets from a pointer to a frame. Ensure ptr_frame is a valid
 /// pointer or the process will crash!
-pub(super) unsafe fn extract_packets_from_frame(ptr_frame: *const u8) -> Result<Vec<Vec<u8>>> {
+pub(super) unsafe fn extract_packets_from_frame(ptr_frame: *const u8) -> Result<Vec<Packet>> {
     if ptr_frame.is_null() {
         return Err(format_err!(
             "hook was called with a null pointer. Skipping."
@@ -85,7 +90,7 @@ pub(super) unsafe fn extract_packets_from_frame(ptr_frame: *const u8) -> Result<
 
     let mut frame_data_offset: usize = 0;
 
-    let mut packets: Vec<Vec<u8>> = Vec::new();
+    let mut packets: Vec<Packet> = Vec::new();
     for _ in 0..num_segments {
         let segment_size = segment_header::size::read(&frame_data[frame_data_offset..]);
         let segment_header_size = segment_header::SIZE.unwrap();
@@ -94,33 +99,39 @@ pub(super) unsafe fn extract_packets_from_frame(ptr_frame: *const u8) -> Result<
             return Err(format_err!("segment_size is invalid: {}", frame_size));
         }
 
-        let segment = segment::View::new(
-            &frame_data[frame_data_offset..frame_data_offset + segment_size as usize],
-        );
+        let segment_bytes =
+            &frame_data[frame_data_offset..frame_data_offset + segment_size as usize];
+        let segment = segment::View::new(segment_bytes);
         frame_data_offset += segment_size as usize;
 
-        // Capture only IPC segment type
-        if segment.header().segment_type().read() != 3 {
-            continue;
+        if segment.header().segment_type().read() == 3 {
+            // If IPC segment type, decode it and wrap it with a deucalion_segment
+            let segment_header = segment.header();
+            let deucalion_header_size = deucalion_segment_header::SIZE.unwrap();
+            let payload_len = segment_size as usize - segment_header_size + deucalion_header_size;
+
+            let mut dst = Vec::<u8>::with_capacity(payload_len);
+            dst.set_len(payload_len);
+            let buf: &mut [u8] = dst.as_mut();
+            let mut deucalion_segment = deucalion_segment::View::new(buf);
+            let mut dsh = deucalion_segment.header_mut();
+            dsh.source_actor_mut()
+                .write(segment_header.source_actor().read());
+            dsh.target_actor_mut()
+                .write(segment_header.target_actor().read());
+            dsh.timestamp_mut().write(frame_header.timestamp().read());
+
+            deucalion_segment.data_mut().copy_from_slice(segment.data());
+
+            packets.push(Packet::IPC(dst));
+        } else {
+            // Otherwise just copy the segment as-is
+            let mut dst = Vec::<u8>::with_capacity(segment_bytes.len());
+            dst.set_len(segment_bytes.len());
+            dst.copy_from_slice(segment_bytes);
+
+            packets.push(Packet::Other(dst));
         }
-        let segment_header = segment.header();
-        let deucalion_header_size = deucalion_segment_header::SIZE.unwrap();
-        let payload_len = segment_size as usize - segment_header_size + deucalion_header_size;
-
-        let mut dst = Vec::<u8>::with_capacity(payload_len);
-        dst.set_len(payload_len);
-        let buf: &mut [u8] = dst.as_mut();
-        let mut deucalion_segment = deucalion_segment::View::new(buf);
-        let mut dsh = deucalion_segment.header_mut();
-        dsh.source_actor_mut()
-            .write(segment_header.source_actor().read());
-        dsh.target_actor_mut()
-            .write(segment_header.target_actor().read());
-        dsh.timestamp_mut().write(frame_header.timestamp().read());
-
-        deucalion_segment.data_mut().copy_from_slice(segment.data());
-
-        packets.push(dst);
     }
     return Ok(packets);
 }
