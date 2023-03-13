@@ -38,18 +38,25 @@ use log::{error, info};
 #[cfg(debug_assertions)]
 use simplelog::{CombinedLogger, SimpleLogger};
 
-const RECV_HOOK_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
-const SEND_HOOK_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
+const RECV_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
+const SEND_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
+const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     info!("Received payload from subscriber: {:?}", payload);
     if payload.op == rpc::MessageOps::Recv || payload.op == rpc::MessageOps::Send {
-        let direction = match payload.op {
-            rpc::MessageOps::Recv => hook::Direction::Recv,
-            rpc::MessageOps::Send => hook::Direction::Send,
+        let hook_type = match payload.op {
+            rpc::MessageOps::Recv => hook::HookType::Recv,
+            rpc::MessageOps::Send => {
+                if payload.ctx == 0 {
+                    hook::HookType::SendLobby
+                } else {
+                    hook::HookType::Send
+                }
+            }
             _ => panic!("This case shouldn't be possible"),
         };
-        if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data, direction) {
+        if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data, hook_type) {
             let err = format_err!("error initializing hook: {:?}", e);
             error!("{:?}", err);
             return Err(err);
@@ -61,10 +68,28 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
 fn parse_sig_and_initialize_hook(
     hs: Arc<hook::State>,
     data: Vec<u8>,
-    direction: hook::Direction,
+    hook_type: hook::HookType,
 ) -> Result<()> {
     let sig_str = String::from_utf8(data).context("Invalid string")?;
-    hs.initialize_hook(sig_str, direction)
+    hs.initialize_hook(sig_str, hook_type)
+}
+
+fn initialize_hook_with_sig(hs: &Arc<hook::State>, sig: &str, hook_type: hook::HookType) -> bool {
+    if let Err(e) = hs.initialize_hook(sig.into(), hook_type) {
+        error!("Could not auto-initialize the {} hook: {}", hook_type, e);
+        false
+    } else {
+        true
+    }
+}
+/// Automatically initialize all the hooks, but do not fatally exit if any
+/// fail to initialize.
+/// Returns initialization status for Recv, Send, SendLobby hook types
+fn auto_initialize_hooks(hs: &Arc<hook::State>) -> (bool, bool, bool) {
+    let r = initialize_hook_with_sig(hs, RECV_SIG, hook::HookType::Recv);
+    let s = initialize_hook_with_sig(hs, SEND_SIG, hook::HookType::Send);
+    let sl = initialize_hook_with_sig(hs, SEND_LOBBY_SIG, hook::HookType::SendLobby);
+    (r, s, sl)
 }
 
 #[tokio::main]
@@ -74,27 +99,9 @@ async fn main_with_result() -> Result<()> {
 
     info!("Attempting to auto-initialize the hooks");
 
-    let recv_initialized = {
-        if let Err(e) = hs.initialize_hook(RECV_HOOK_SIG.into(), hook::Direction::Recv) {
-            error!("Could not auto-initialize the recv hook: {}", e);
-            false
-        } else {
-            true
-        }
-    };
+    let (r, s, sl) = auto_initialize_hooks(&hs);
 
-    let send_initialized = {
-        if let Err(e) = hs.initialize_hook(SEND_HOOK_SIG.into(), hook::Direction::Send) {
-            error!("Could not auto-initialize the send hook: {}", e);
-            false
-        } else {
-            true
-        }
-    };
-
-    deucalion_server
-        .set_hook_state(recv_initialized, send_initialized)
-        .await;
+    deucalion_server.set_hook_status(r, s, sl).await;
     info!("Hooks initialized.");
 
     // Clone references to hook state and server state so that they can

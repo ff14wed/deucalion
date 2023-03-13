@@ -125,8 +125,9 @@ fn allow_broadcast(op: rpc::MessageOps, channel: u32, filter: u32) -> bool {
 struct State {
     subscribers: HashMap<usize, Tx>,
     counter: usize,
-    recv_initialized: bool,
-    send_initialized: bool,
+    recv_hooked: bool,
+    send_hooked: bool,
+    send_lobby_hooked: bool,
 }
 
 impl State {
@@ -145,18 +146,17 @@ impl State {
         (id, rx)
     }
 
+    fn hook_status_string(status: bool) -> &'static str {
+        return if status { "ON" } else { "OFF" };
+    }
+
     fn server_hello_string(&self) -> String {
-        let recv_status = if self.recv_initialized {
-            "RECV INITIALIZED."
-        } else {
-            "RECV REQUIRES SIG."
-        };
-        let send_status = if self.send_initialized {
-            "SEND INITIALIZED."
-        } else {
-            "SEND REQUIRES SIG."
-        };
-        format!("SERVER HELLO. STATUS: {} {}", recv_status, send_status)
+        format!(
+            "SERVER HELLO. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+            Self::hook_status_string(self.recv_hooked),
+            Self::hook_status_string(self.send_hooked),
+            Self::hook_status_string(self.send_lobby_hooked),
+        )
     }
 }
 
@@ -172,17 +172,20 @@ impl Server {
             state: Arc::new(Mutex::new(State {
                 subscribers: HashMap::new(),
                 counter: 0,
-                recv_initialized: false,
-                send_initialized: false,
+                recv_hooked: false,
+                send_hooked: false,
+                send_lobby_hooked: false,
             })),
             shutdown_tx: OnceCell::new(),
         }
     }
 
-    pub async fn set_hook_state(&self, recv_initialized: bool, send_initialized: bool) {
+    /// Notifies the server of the hook status.
+    pub async fn set_hook_status(&self, r: bool, s: bool, sl: bool) {
         let mut state = self.state.lock().await;
-        state.recv_initialized = recv_initialized;
-        state.send_initialized = send_initialized;
+        state.recv_hooked = r;
+        state.send_hooked = s;
+        state.send_lobby_hooked = sl;
     }
 
     pub async fn shutdown(&self) {
@@ -465,33 +468,25 @@ mod tests {
     async fn test_server_hello_message() {
         let server = Server::new();
 
+        let fmt_msg = |a, b, c| {
+            format!(
+                "SERVER HELLO. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+                a, b, c
+            )
+        };
         let combinations = vec![
-            (
-                false,
-                false,
-                "SERVER HELLO. STATUS: RECV REQUIRES SIG. SEND REQUIRES SIG.",
-            ),
-            (
-                false,
-                true,
-                "SERVER HELLO. STATUS: RECV REQUIRES SIG. SEND INITIALIZED.",
-            ),
-            (
-                true,
-                false,
-                "SERVER HELLO. STATUS: RECV INITIALIZED. SEND REQUIRES SIG.",
-            ),
-            (
-                true,
-                true,
-                "SERVER HELLO. STATUS: RECV INITIALIZED. SEND INITIALIZED.",
-            ),
+            (false, false, false, fmt_msg("OFF", "OFF", "OFF")),
+            (false, false, true, fmt_msg("OFF", "OFF", "ON")),
+            (false, true, false, fmt_msg("OFF", "ON", "OFF")),
+            (false, true, true, fmt_msg("OFF", "ON", "ON")),
+            (true, false, false, fmt_msg("ON", "OFF", "OFF")),
+            (true, false, true, fmt_msg("ON", "OFF", "ON")),
+            (true, true, false, fmt_msg("ON", "ON", "OFF")),
+            (true, true, true, fmt_msg("ON", "ON", "ON")),
         ];
 
-        for (recv_initialized, send_initialized, expected_hello) in combinations {
-            server
-                .set_hook_state(recv_initialized, send_initialized)
-                .await;
+        for (r, s, sl, expected_hello) in combinations {
+            server.set_hook_status(r, s, sl).await;
 
             assert_eq!(
                 server.state.lock().await.server_hello_string(),
