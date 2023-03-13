@@ -295,7 +295,11 @@ impl Server {
                                 ctx: 0,
                                 data: format!("Packet filters set: {filter:#010b}").into_bytes(),
                             })
-                            .await?
+                            .await?;
+                        info!(
+                            "Filter set for subscriber {}: {filter:#010b}",
+                            subscriber.id
+                        );
                     }
                     _ => {
                         Self::handle_payload_from_subscriber(
