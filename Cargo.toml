@@ -1,8 +1,14 @@
 [package]
 name = "deucalion"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["ff14wed"]
 edition = "2021"
+build = "build.rs"
+
+[package.metadata.winres]
+OriginalFilename = "deucalion.dll"
+CompanyName = "Flawed"
+LegalCopyright = "Copyright (C) Flawed"
 
 [lib]
 name = "deucalion"
@@ -37,3 +43,6 @@ winapi = { version = "0.3", features = [
 [dev-dependencies]
 ntest = "*"
 rand = "0.8.5"
+
+[build-dependencies]
+winres = "0.1"
