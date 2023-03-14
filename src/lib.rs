@@ -136,7 +136,7 @@ async fn main_with_result() -> Result<()> {
     // Block on server loop
     let hs_clone = hs.clone();
     if let Err(e) = deucalion_server
-        .run(pipe_name, move |payload: rpc::Payload| {
+        .run(pipe_name, true, move |payload: rpc::Payload| {
             handle_payload(payload, hs_clone.clone())
         })
         .await

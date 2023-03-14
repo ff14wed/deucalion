@@ -10,6 +10,7 @@ use futures::{SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
+use tokio::time::{self, Duration};
 use tokio_util::codec::Framed;
 
 use once_cell::sync::OnceCell;
@@ -19,21 +20,21 @@ use stream_cancel::Tripwire;
 use log::{error, info};
 
 use crate::namedpipe::Endpoint;
-use crate::rpc;
+use crate::rpc::{MessageOps, Payload, PayloadCodec};
 
 /// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<rpc::Payload>;
+type Tx = mpsc::UnboundedSender<Payload>;
 
 /// Shorthand for the receive half of the message channel.
-type Rx = mpsc::UnboundedReceiver<rpc::Payload>;
+type Rx = mpsc::UnboundedReceiver<Payload>;
 
 #[derive(Debug)]
 enum Message {
     /// A message that was sent from a subscriber to the server
-    Request(rpc::Payload),
+    Request(Payload),
 
     /// A message that should be sent to subscribers
-    Data(rpc::Payload),
+    Data(Payload),
 }
 
 /// The state for each connected subscriber.
@@ -47,7 +48,7 @@ where
     /// This handles sending and receiving data on the socket. With this codec,
     /// we can work at the Payload level instead of having to manage the
     /// raw byte operations.
-    frames: Framed<T, rpc::PayloadCodec>,
+    frames: Framed<T, PayloadCodec>,
 
     /// Receive half of the message channel.
     ///
@@ -99,22 +100,22 @@ enum BroadcastFilter {
     AllowOther = 1 << 6, // In case the channel is not one of [Lobby, Zone, Chat]
 }
 
-fn allow_broadcast(op: rpc::MessageOps, channel: u32, filter: u32) -> bool {
+fn allow_broadcast(op: MessageOps, channel: u32, filter: u32) -> bool {
     match op {
-        rpc::MessageOps::Recv => match channel {
+        MessageOps::Recv => match channel {
             0 => (filter & BroadcastFilter::AllowLobbyRecv as u32) > 0,
             1 => (filter & BroadcastFilter::AllowZoneRecv as u32) > 0,
             2 => (filter & BroadcastFilter::AllowChatRecv as u32) > 0,
             _ => (filter & BroadcastFilter::AllowOther as u32) > 0,
         },
-        rpc::MessageOps::Send => match channel {
+        MessageOps::Send => match channel {
             0 => (filter & BroadcastFilter::AllowLobbySend as u32) > 0,
             1 => (filter & BroadcastFilter::AllowZoneSend as u32) > 0,
             2 => (filter & BroadcastFilter::AllowChatSend as u32) > 0,
             _ => (filter & BroadcastFilter::AllowOther as u32) > 0,
         },
-        rpc::MessageOps::RecvOther => (filter & BroadcastFilter::AllowOther as u32) > 0,
-        rpc::MessageOps::SendOther => (filter & BroadcastFilter::AllowOther as u32) > 0,
+        MessageOps::RecvOther => (filter & BroadcastFilter::AllowOther as u32) > 0,
+        MessageOps::SendOther => (filter & BroadcastFilter::AllowOther as u32) > 0,
         // All other message ops are always allowed
         _ => true,
     }
@@ -199,7 +200,7 @@ impl Server {
             .await;
     }
 
-    pub async fn broadcast(&self, message: rpc::Payload) {
+    pub async fn broadcast(&self, message: Payload) {
         let mut state = self.state.lock().await;
         for subscriber in state.subscribers.iter_mut() {
             let _ = subscriber.1.send(message.clone());
@@ -208,20 +209,20 @@ impl Server {
 
     /// Handle the payload from subscriber and send a success/failure response back
     async fn handle_payload_from_subscriber<T, F>(
-        payload: rpc::Payload,
+        payload: Payload,
         subscriber: &mut Subscriber<T>,
         payload_handler: &F,
     ) -> Result<()>
     where
         T: AsyncRead + AsyncWrite + std::marker::Unpin,
-        F: Fn(rpc::Payload) -> Result<()>,
+        F: Fn(Payload) -> Result<()>,
     {
         let ctx = payload.ctx;
 
         let ack_prefix = {
             match payload.op {
-                rpc::MessageOps::Recv => "RECV ",
-                rpc::MessageOps::Send => "SEND ",
+                MessageOps::Recv => "RECV ",
+                MessageOps::Send => "SEND ",
                 _ => "",
             }
         };
@@ -230,8 +231,8 @@ impl Server {
             Ok(()) => {
                 subscriber
                     .frames
-                    .send(rpc::Payload {
-                        op: rpc::MessageOps::Debug,
+                    .send(Payload {
+                        op: MessageOps::Debug,
                         ctx,
                         data: format!("{}OK", ack_prefix).into_bytes(),
                     })
@@ -240,8 +241,8 @@ impl Server {
             Err(e) => {
                 subscriber
                     .frames
-                    .send(rpc::Payload {
-                        op: rpc::MessageOps::Debug,
+                    .send(Payload {
+                        op: MessageOps::Debug,
                         ctx,
                         data: format!("{}{}", ack_prefix, e).into_bytes(),
                     })
@@ -262,10 +263,10 @@ impl Server {
     ) -> Result<bool>
     where
         T: AsyncRead + AsyncWrite + std::marker::Unpin,
-        F: Fn(rpc::Payload) -> Result<()>,
+        F: Fn(Payload) -> Result<()>,
     {
-        let ping_payload = rpc::Payload {
-            op: rpc::MessageOps::Ping,
+        let ping_payload = Payload {
+            op: MessageOps::Ping,
             ctx: 0,
             data: Vec::new(),
         };
@@ -278,20 +279,20 @@ impl Server {
             match result {
                 // A request was received from the current subscriber
                 Ok(Message::Request(payload)) => match payload.op {
-                    rpc::MessageOps::Ping => {
+                    MessageOps::Ping => {
                         subscriber.frames.send(ping_payload.clone()).await?;
                     }
-                    rpc::MessageOps::Exit => {
+                    MessageOps::Exit => {
                         info!("Shutting down server because Exit payload received");
                         self.shutdown().await;
                         return Ok(true);
                     }
-                    rpc::MessageOps::Option => {
+                    MessageOps::Option => {
                         filter = payload.ctx;
                         subscriber
                             .frames
-                            .send(rpc::Payload {
-                                op: rpc::MessageOps::Debug,
+                            .send(Payload {
+                                op: MessageOps::Debug,
                                 ctx: 0,
                                 data: format!("Packet filters set: {filter:#010b}").into_bytes(),
                             })
@@ -336,9 +337,9 @@ impl Server {
         payload_handler: F,
     ) -> Result<()>
     where
-        F: Fn(rpc::Payload) -> Result<()>,
+        F: Fn(Payload) -> Result<()>,
     {
-        let codec = rpc::PayloadCodec::new();
+        let codec = PayloadCodec::new();
         let frames = Framed::new(stream, codec);
 
         let (id, rx) = self.state.lock().await.new_subscriber();
@@ -349,8 +350,8 @@ impl Server {
         subscriber
             .frames
             .send(
-                rpc::Payload {
-                    op: rpc::MessageOps::Debug,
+                Payload {
+                    op: MessageOps::Debug,
                     ctx: 9000,
                     data: hello_string.into_bytes(),
                 }
@@ -391,9 +392,14 @@ impl Server {
         Ok(())
     }
 
-    pub async fn run<F>(&self, pipe_name: String, payload_handler: F) -> Result<()>
+    pub async fn run<F>(
+        &self,
+        pipe_name: String,
+        enable_ping: bool,
+        payload_handler: F,
+    ) -> Result<()>
     where
-        F: Fn(rpc::Payload) -> Result<(), Error> + Sync + Send + Clone + 'static,
+        F: Fn(Payload) -> Result<(), Error> + Sync + Send + Clone + 'static,
     {
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         self.shutdown_tx
@@ -414,6 +420,24 @@ impl Server {
             trigger.cancel();
         });
 
+        let self_clone = self.clone();
+        let ping_task = tokio::spawn(async move {
+            if enable_ping {
+                let mut interval = time::interval(Duration::from_secs(1));
+
+                loop {
+                    interval.tick().await;
+                    self_clone
+                        .broadcast(Payload {
+                            op: MessageOps::Ping,
+                            ctx: 0,
+                            data: Vec::new(),
+                        })
+                        .await;
+                }
+            }
+        });
+
         let mut subscriber_set = JoinSet::new();
 
         // Wait on subscribers and create a new loop task for each new
@@ -432,6 +456,11 @@ impl Server {
                 Err(e) => error!("Unable to connect to subscriber: {}", e),
             }
         }
+
+        info!("Aborting ping task");
+        ping_task.abort();
+        let _ = ping_task.await?;
+
         info!("Shutting down subscriber handlers");
         subscriber_set.shutdown().await;
 
@@ -452,15 +481,15 @@ mod tests {
     #[test]
     fn test_individual_packet_filters() {
         let configurations = [
-            (BroadcastFilter::AllowLobbyRecv, rpc::MessageOps::Recv, 0),
-            (BroadcastFilter::AllowZoneRecv, rpc::MessageOps::Recv, 1),
-            (BroadcastFilter::AllowChatRecv, rpc::MessageOps::Recv, 2),
-            (BroadcastFilter::AllowLobbySend, rpc::MessageOps::Send, 0),
-            (BroadcastFilter::AllowZoneSend, rpc::MessageOps::Send, 1),
-            (BroadcastFilter::AllowChatSend, rpc::MessageOps::Send, 2),
-            (BroadcastFilter::AllowOther, rpc::MessageOps::Recv, 100),
-            (BroadcastFilter::AllowOther, rpc::MessageOps::RecvOther, 0),
-            (BroadcastFilter::AllowOther, rpc::MessageOps::SendOther, 0),
+            (BroadcastFilter::AllowLobbyRecv, MessageOps::Recv, 0),
+            (BroadcastFilter::AllowZoneRecv, MessageOps::Recv, 1),
+            (BroadcastFilter::AllowChatRecv, MessageOps::Recv, 2),
+            (BroadcastFilter::AllowLobbySend, MessageOps::Send, 0),
+            (BroadcastFilter::AllowZoneSend, MessageOps::Send, 1),
+            (BroadcastFilter::AllowChatSend, MessageOps::Send, 2),
+            (BroadcastFilter::AllowOther, MessageOps::Recv, 100),
+            (BroadcastFilter::AllowOther, MessageOps::RecvOther, 0),
+            (BroadcastFilter::AllowOther, MessageOps::SendOther, 0),
         ];
         const ALLOW_EVERYTHING: u32 = 0xFF;
         for (filter, op, ctx) in configurations {
@@ -515,17 +544,17 @@ mod tests {
         let pipe_name_clone = pipe_name.clone();
         let server_handle = tokio::spawn(async move {
             server_clone
-                .run(pipe_name_clone, move |_: rpc::Payload| Ok(()))
+                .run(pipe_name_clone, false, move |_: Payload| Ok(()))
                 .await
                 .expect("Server should not fail to run");
         });
         // Give the server some time to start
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        time::sleep(Duration::from_millis(100)).await;
 
         (server, pipe_name, server_handle)
     }
 
-    async fn handle_server_hello<T>(frames: &mut Framed<T, rpc::PayloadCodec>)
+    async fn handle_server_hello<T>(frames: &mut Framed<T, PayloadCodec>)
     where
         T: AsyncRead + AsyncWrite + std::marker::Unpin,
     {
@@ -548,7 +577,7 @@ mod tests {
                 .await
                 .expect("Failed to connect subscriber to server");
 
-            let codec = rpc::PayloadCodec::new();
+            let codec = PayloadCodec::new();
             let mut frames = Framed::new(subscriber, codec);
 
             handle_server_hello(&mut frames).await;
@@ -559,8 +588,8 @@ mod tests {
 
             // Send option
             frames
-                .send(rpc::Payload {
-                    op: rpc::MessageOps::Option,
+                .send(Payload {
+                    op: MessageOps::Option,
                     ctx: filter,
                     data: Vec::new(),
                 })
@@ -569,7 +598,7 @@ mod tests {
 
             let message = frames.next().await.unwrap();
             if let Ok(payload) = message {
-                assert_eq!(payload.op, rpc::MessageOps::Debug);
+                assert_eq!(payload.op, MessageOps::Debug);
                 assert_eq!(
                     String::from_utf8(payload.data).unwrap(),
                     "Packet filters set: 0b00100110",
@@ -579,18 +608,18 @@ mod tests {
             }
 
             let configurations = vec![
-                (rpc::MessageOps::Recv, 0, false),
-                (rpc::MessageOps::Recv, 1, true),
-                (rpc::MessageOps::Recv, 2, true),
-                (rpc::MessageOps::Send, 0, false),
-                (rpc::MessageOps::Send, 1, false),
-                (rpc::MessageOps::Send, 2, true),
-                (rpc::MessageOps::Recv, 100, false),
+                (MessageOps::Recv, 0, false),
+                (MessageOps::Recv, 1, true),
+                (MessageOps::Recv, 2, true),
+                (MessageOps::Send, 0, false),
+                (MessageOps::Send, 1, false),
+                (MessageOps::Send, 2, true),
+                (MessageOps::Recv, 100, false),
             ];
 
             for (op, ctx, should_be_allowed) in configurations {
                 server
-                    .broadcast(rpc::Payload {
+                    .broadcast(Payload {
                         op,
                         ctx,
                         data: Vec::new(),
@@ -601,7 +630,7 @@ mod tests {
                     data = frames.next() => {
                         assert_eq!(should_be_allowed, true, "packet should be filtered: {:?}", data);
                     }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    _ = time::sleep(Duration::from_millis(100)) => {
                         assert_eq!(should_be_allowed, false, "packet should not be filtered: {:?}: {}", op, ctx)
                     }
                 }
@@ -622,15 +651,15 @@ mod tests {
             .await
             .expect("Failed to connect subscriber to server");
 
-        let codec = rpc::PayloadCodec::new();
+        let codec = PayloadCodec::new();
         let mut frames = Framed::new(subscriber, codec);
 
         handle_server_hello(&mut frames).await;
 
         // Send exit
         frames
-            .send(rpc::Payload {
-                op: rpc::MessageOps::Exit,
+            .send(Payload {
+                op: MessageOps::Exit,
                 ctx: 0,
                 data: Vec::new(),
             })
@@ -652,7 +681,7 @@ mod tests {
         let subscriber = Endpoint::connect(&pipe_name)
             .await
             .expect("Failed to connect subscriber to server");
-        let codec = rpc::PayloadCodec::new();
+        let codec = PayloadCodec::new();
         let mut frames = Framed::new(subscriber, codec);
 
         handle_server_hello(&mut frames).await;
@@ -681,7 +710,7 @@ mod tests {
             .await
             .expect("Failed to connect subscriber to server");
 
-        let codec = rpc::PayloadCodec::new();
+        let codec = PayloadCodec::new();
         let mut frames = Framed::new(subscriber, codec);
 
         handle_server_hello(&mut frames).await;
@@ -705,7 +734,7 @@ mod tests {
                 .await
                 .expect("Failed to connect subscriber to server");
 
-            let codec = rpc::PayloadCodec::new();
+            let codec = PayloadCodec::new();
             let mut frames = Framed::new(subscriber, codec);
             while let Some(_) = frames.next().await {}
         });
@@ -717,8 +746,8 @@ mod tests {
             rand::thread_rng().fill(&mut dummy_data[..]);
 
             server
-                .broadcast(rpc::Payload {
-                    op: rpc::MessageOps::Debug,
+                .broadcast(Payload {
+                    op: MessageOps::Debug,
                     ctx: i,
                     data: dummy_data,
                 })
@@ -726,7 +755,7 @@ mod tests {
         }
 
         // Give some time for the subscriber to process the messages
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        time::sleep(Duration::from_millis(100)).await;
 
         subscriber_handle.abort();
         if let Err(e) = subscriber_handle.await {
@@ -757,7 +786,7 @@ mod tests {
                 .await
                 .expect("Failed to connect subscriber to server");
 
-            let codec = rpc::PayloadCodec::new();
+            let codec = PayloadCodec::new();
             let mut frames = Framed::new(subscriber, codec);
 
             handle_server_hello(&mut frames).await;
@@ -769,8 +798,8 @@ mod tests {
                 rand::thread_rng().fill(&mut dummy_data[..]);
 
                 server
-                    .broadcast(rpc::Payload {
-                        op: rpc::MessageOps::Debug,
+                    .broadcast(Payload {
+                        op: MessageOps::Debug,
                         ctx: i,
                         data: dummy_data,
                     })
@@ -812,7 +841,7 @@ mod tests {
             let sub_handle = tokio::spawn(async move {
                 // If the subscriber couldn't connect it's okay
                 if let Ok(subscriber) = Endpoint::connect(&pipe_name_clone).await {
-                    let codec = rpc::PayloadCodec::new();
+                    let codec = PayloadCodec::new();
                     let mut frames = Framed::new(subscriber, codec);
                     while let Some(_) = frames.next().await {}
                 }
@@ -824,7 +853,7 @@ mod tests {
             .await
             .expect("Failed to connect subscriber to server");
 
-        let codec = rpc::PayloadCodec::new();
+        let codec = PayloadCodec::new();
         let mut frames = Framed::new(subscriber, codec);
 
         handle_server_hello(&mut frames).await;
@@ -846,8 +875,8 @@ mod tests {
         // Send two packets
         for i in 0..2 {
             server
-                .broadcast(rpc::Payload {
-                    op: rpc::MessageOps::Debug,
+                .broadcast(Payload {
+                    op: MessageOps::Debug,
                     ctx: i,
                     data: Vec::new(),
                 })
@@ -855,7 +884,7 @@ mod tests {
         }
 
         // Give some time for the subscriber to process the messages
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        time::sleep(Duration::from_millis(100)).await;
 
         subscriber_handle.abort();
         if let Err(e) = subscriber_handle.await {
