@@ -33,9 +33,6 @@ jobs:
     - name: Build
       run: |
         cargo build --release
-        sha256sum target/release/deucalion.dll > deucalion.sha256sum
-        gpg --output deucalion.sha256sum.asc --clearsign deucalion.sha256sum
-        cat deucalion.sha256sum.asc
 
     - name: Code Sign
       uses: dlemstra/code-sign-action@v1
@@ -45,6 +42,12 @@ jobs:
         recursive: false
         files: |
           target/release/deucalion.dll
+
+    - name: SHA256Sum and GPG Sign
+      run: |
+        sha256sum target/release/deucalion.dll > deucalion.sha256sum
+        gpg --output deucalion.sha256sum.asc --clearsign deucalion.sha256sum
+        cat deucalion.sha256sum.asc
 
     - name: Upload artifact
       uses: actions/upload-artifact@v3
