@@ -459,7 +459,7 @@ impl Server {
 
         info!("Aborting ping task");
         ping_task.abort();
-        let _ = ping_task.await?;
+        let _ = ping_task.await;
 
         info!("Shutting down subscriber handlers");
         subscriber_set.shutdown().await;
