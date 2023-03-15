@@ -94,6 +94,7 @@ impl State {
     }
 
     pub fn shutdown(&self) {
+        info!("Shutting down hooks...");
         self.recv_hook.shutdown();
         self.send_hook.shutdown();
         self.send_lobby_hook.shutdown();

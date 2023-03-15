@@ -146,7 +146,7 @@ async fn main_with_result() -> Result<()> {
 
     // Signal the msg loop to exit and shut down the hook
     drop(shutdown_tx);
-    info!("Hook shutdown initiated...");
+    info!("Shutting down broadcast loop...");
     msg_loop_handle.await?;
     info!("Shut down!");
     Ok(())
