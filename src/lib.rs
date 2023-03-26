@@ -2,9 +2,10 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::panic;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use simplelog::{self, LevelFilter, WriteLogger};
+
 #[cfg(windows)]
 use winapi::shared::minwindef::*;
 use winapi::um::libloaderapi;
@@ -13,8 +14,10 @@ use winapi::um::processthreadsapi;
 
 #[cfg(debug_assertions)]
 use winapi::um::consoleapi;
+use winapi::um::synchapi::WaitForSingleObject;
 #[cfg(debug_assertions)]
 use winapi::um::wincon;
+use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, HANDLE};
 
 use std::sync::Arc;
 
@@ -22,6 +25,9 @@ use anyhow::{format_err, Context, Result};
 
 use tokio::select;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
+
+use once_cell::sync::OnceCell;
 
 use dirs;
 
@@ -33,7 +39,7 @@ pub mod rpc;
 
 mod server;
 
-use log::{error, info};
+use log::{debug, error, info};
 
 #[cfg(debug_assertions)]
 use simplelog::{CombinedLogger, SimpleLogger};
@@ -92,6 +98,8 @@ fn auto_initialize_hooks(hs: &Arc<hook::State>) -> (bool, bool, bool) {
     (r, s, sl)
 }
 
+static DLL_CANCELLATION_TOKEN: OnceCell<CancellationToken> = OnceCell::new();
+
 #[tokio::main]
 async fn main_with_result() -> Result<()> {
     let hs = Arc::new(hook::State::new().context("error setting up the hook")?);
@@ -129,6 +137,16 @@ async fn main_with_result() -> Result<()> {
         }
     });
 
+    let deucalion_server_clone = deucalion_server.clone();
+    tokio::spawn(async move {
+        DLL_CANCELLATION_TOKEN
+            .get()
+            .expect("DLL_CANCELLATION_TOKEN should exist")
+            .cancelled()
+            .await;
+        deucalion_server_clone.shutdown().await;
+    });
+
     let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
     let pipe_name = format!(r"\\.\pipe\deucalion-{}", pid as u32);
 
@@ -152,18 +170,40 @@ async fn main_with_result() -> Result<()> {
     Ok(())
 }
 
+static MAIN_THREAD_HANDLE: OnceCell<usize> = OnceCell::new();
+
 #[allow(non_snake_case)]
 #[no_mangle]
 pub unsafe extern "system" fn DllMain(hModule: HINSTANCE, reason: u32, _: u32) -> BOOL {
-    if reason == 1 {
-        processthreadsapi::CreateThread(
-            0 as LPSECURITY_ATTRIBUTES,
-            0,
-            Some(main),
-            hModule as LPVOID,
-            0,
-            0 as LPDWORD,
+    if reason == DLL_PROCESS_ATTACH {
+        DLL_CANCELLATION_TOKEN
+            .set(CancellationToken::new())
+            .expect("DLL_CANCELLATION_TOKEN should not exist prior");
+
+        MAIN_THREAD_HANDLE
+            .set(processthreadsapi::CreateThread(
+                0 as LPSECURITY_ATTRIBUTES,
+                0,
+                Some(main),
+                hModule as LPVOID,
+                0,
+                0 as LPDWORD,
+            ) as usize)
+            .expect("MAIN_THREAD_HANDLE should not exist prior");
+    } else if reason == DLL_PROCESS_DETACH {
+        info!("Handling DLL_PROCESS_DETACH");
+        DLL_CANCELLATION_TOKEN
+            .get()
+            .expect("DLL_CANCELLATION_TOKEN should exist")
+            .cancel();
+        info!("Waiting for main thread to exit");
+        WaitForSingleObject(
+            *MAIN_THREAD_HANDLE
+                .get()
+                .expect("MAIN_THREAD_HANDLE should exist") as HANDLE,
+            5000,
         );
+        info!("Exiting...");
     }
     TRUE
 }
@@ -183,7 +223,7 @@ fn logging_setup() -> Result<()> {
     log_path.push("deucalion");
     fs::create_dir_all(log_path.as_path())?;
 
-    log_path.push(format!("session-{}.log", secs_since_epoch));
+    log_path.push(format!("debug-session-{}.log", secs_since_epoch));
 
     let log_file = File::create(log_path.as_path())?;
 
@@ -222,7 +262,18 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
     }
     #[cfg(debug_assertions)]
     wincon::FreeConsole();
-    libloaderapi::FreeLibraryAndExitThread(dll_base_addr as HMODULE, 0);
+    if !DLL_CANCELLATION_TOKEN
+        .get()
+        .expect("DLL_CANCELLATION_TOKEN should exist")
+        .is_cancelled()
+    {
+        debug!("Freeing library and exiting thread");
+        // Only call FreeLibraryAndExitThread if we are shutting down normally
+        libloaderapi::FreeLibraryAndExitThread(dll_base_addr as HMODULE, 0);
+    } else {
+        debug!("Exiting because detach");
+        processthreadsapi::ExitThread(0);
+    }
     // Exit should happen before here
     return 0;
 }

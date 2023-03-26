@@ -1,11 +1,8 @@
 use std::mem;
-use std::sync::Arc;
 
 use anyhow::Result;
 
 use tokio::sync::mpsc;
-
-use once_cell::sync::OnceCell;
 
 use retour;
 use retour::static_detour;
@@ -30,8 +27,6 @@ static_detour! {
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
 
-    lobby_hook: Arc<OnceCell<&'static retour::StaticDetour<HookedFunction>>>,
-
     wg: waitgroup::WaitGroup,
 }
 
@@ -40,11 +35,7 @@ impl Hook {
         data_tx: mpsc::UnboundedSender<rpc::Payload>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook> {
-        Ok(Hook {
-            data_tx,
-            lobby_hook: Arc::new(OnceCell::new()),
-            wg,
-        })
+        Ok(Hook { data_tx, wg })
     }
 
     pub fn setup(&self, rvas: Vec<usize>) -> Result<()> {
@@ -57,17 +48,11 @@ impl Hook {
         }
 
         let self_clone = self.clone();
-        let lobby_hook = unsafe {
-            let ptr_fn: HookedFunction = mem::transmute(ptrs[0] as *const ());
-            SendLobbyPacket.initialize(ptr_fn, move |a| self_clone.send_lobby_packet(a))?
-        };
-        if let Err(_) = self.lobby_hook.set(lobby_hook) {
-            return Err(HookError::SetupFailed(Channel::Lobby).into());
-        }
-
         unsafe {
-            self.lobby_hook.get_unchecked().enable()?;
-        }
+            let ptr_fn: HookedFunction = mem::transmute(ptrs[0] as *const ());
+            SendLobbyPacket.initialize(ptr_fn, move |a| self_clone.send_lobby_packet(a))?;
+            SendLobbyPacket.enable()?;
+        };
         Ok(())
     }
 
@@ -99,15 +84,14 @@ impl Hook {
             }
         }
 
-        const INVALID_MSG: &str = "Hook function was called without a valid hook";
-        return self.lobby_hook.get().expect(INVALID_MSG).call(a1);
+        return SendLobbyPacket.call(a1);
     }
 
-    pub fn shutdown(&self) {
+    pub fn shutdown() {
         unsafe {
-            if let Some(hook) = self.lobby_hook.get() {
-                let _ = hook.disable();
-            };
+            if let Err(e) = SendLobbyPacket.disable() {
+                error!("Error disabling SendLobby hook: {}", e);
+            }
         }
     }
 }

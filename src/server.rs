@@ -166,7 +166,7 @@ impl State {
 #[derive(Clone)]
 pub struct Server {
     state: Arc<Mutex<State>>,
-    shutdown_tx: OnceCell<mpsc::Sender<()>>,
+    shutdown_tx: Arc<OnceCell<mpsc::Sender<()>>>,
 }
 
 impl Server {
@@ -179,7 +179,7 @@ impl Server {
                 send_hooked: false,
                 send_lobby_hooked: false,
             })),
-            shutdown_tx: OnceCell::new(),
+            shutdown_tx: Arc::new(OnceCell::new()),
         }
     }
 

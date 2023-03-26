@@ -37,7 +37,7 @@ strum_macros = "0.24"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
-  "minwindef", "minwinbase", "processthreadsapi", "libloaderapi", "consoleapi", "wincon"
+  "minwindef", "minwinbase", "processthreadsapi", "libloaderapi", "consoleapi", "wincon", "synchapi"
 ] }
 
 [dev-dependencies]

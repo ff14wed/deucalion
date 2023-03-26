@@ -36,7 +36,7 @@ pub enum HookType {
 }
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, Display)]
+#[derive(Debug, Clone, Copy)]
 pub(self) enum Channel {
     Lobby,
     Zone,
@@ -45,8 +45,6 @@ pub(self) enum Channel {
 
 #[derive(Debug, Error)]
 pub(self) enum HookError {
-    #[error("failed to set up {0} hook")]
-    SetupFailed(Channel),
     #[error("number of signature matches is incorrect: {0} != {1}")]
     SignatureMatchFailed(usize, usize),
 }
@@ -95,9 +93,9 @@ impl State {
 
     pub fn shutdown(&self) {
         info!("Shutting down hooks...");
-        self.recv_hook.shutdown();
-        self.send_hook.shutdown();
-        self.send_lobby_hook.shutdown();
+        recv::Hook::shutdown();
+        send::Hook::shutdown();
+        send_lobby::Hook::shutdown();
         // Wait for any hooks to finish what they're doing
         self.wg.wait();
     }
