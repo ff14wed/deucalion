@@ -148,7 +148,7 @@ async fn main_with_result() -> Result<()> {
     drop(shutdown_tx);
     info!("Shutting down broadcast loop...");
     msg_loop_handle.await?;
-    info!("Shut down!");
+    info!("Shutting down...");
     Ok(())
 }
 
@@ -220,6 +220,7 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
         error!("Panic happened: {:?}", cause);
         pause();
     }
+    info!("Shut down!");
     #[cfg(debug_assertions)]
     wincon::FreeConsole();
     libloaderapi::FreeLibraryAndExitThread(dll_base_addr as HMODULE, 0);
