@@ -1,14 +1,11 @@
 use std::mem;
-use std::sync::Arc;
 
 use anyhow::Result;
 
 use tokio::sync::mpsc;
 
-use once_cell::sync::OnceCell;
-
 use retour;
-use retour::static_detour;
+use retour::{static_detour, StaticDetour};
 
 use crate::rpc;
 
@@ -21,6 +18,7 @@ use super::{Channel, HookError};
 use log::error;
 
 type HookedFunction = unsafe extern "system" fn(*const u8) -> usize;
+type StaticHook = StaticDetour<HookedFunction>;
 
 static_detour! {
     static SendLobbyPacket: unsafe extern "system" fn(*const u8) -> usize;
@@ -29,9 +27,6 @@ static_detour! {
 #[derive(Clone)]
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
-
-    lobby_hook: Arc<OnceCell<&'static retour::StaticDetour<HookedFunction>>>,
-
     wg: waitgroup::WaitGroup,
 }
 
@@ -40,34 +35,27 @@ impl Hook {
         data_tx: mpsc::UnboundedSender<rpc::Payload>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook> {
-        Ok(Hook {
-            data_tx,
-            lobby_hook: Arc::new(OnceCell::new()),
-            wg,
-        })
+        Ok(Hook { data_tx, wg })
     }
 
     pub fn setup(&self, rvas: Vec<usize>) -> Result<()> {
         if rvas.len() != 1 {
             return Err(HookError::SignatureMatchFailed(rvas.len(), 1).into());
         }
-        let mut ptrs: Vec<*const u8> = Vec::new();
-        for rva in rvas {
-            ptrs.push(get_ffxiv_handle()?.wrapping_offset(rva as isize));
-        }
 
-        let self_clone = self.clone();
-        let lobby_hook = unsafe {
-            let ptr_fn: HookedFunction = mem::transmute(ptrs[0] as *const ());
-            SendLobbyPacket.initialize(ptr_fn, move |a| self_clone.send_lobby_packet(a))?
-        };
-        if let Err(_) = self.lobby_hook.set(lobby_hook) {
-            return Err(HookError::SetupFailed(Channel::Lobby).into());
-        }
-
+        let ptr = get_ffxiv_handle()?.wrapping_add(rvas[0]);
         unsafe {
-            self.lobby_hook.get_unchecked().enable()?;
-        }
+            self.setup_hook(&SendLobbyPacket, ptr)?;
+            SendLobbyPacket.enable()?;
+        };
+
+        Ok(())
+    }
+
+    unsafe fn setup_hook(&self, hook: &StaticHook, rva: *const u8) -> Result<()> {
+        let self_clone = self.clone();
+        let ptr_fn: HookedFunction = mem::transmute(rva as *const ());
+        hook.initialize(ptr_fn, move |a| self_clone.send_lobby_packet(a))?;
         Ok(())
     }
 
@@ -99,15 +87,12 @@ impl Hook {
             }
         }
 
-        const INVALID_MSG: &str = "Hook function was called without a valid hook";
-        return self.lobby_hook.get().expect(INVALID_MSG).call(a1);
+        return SendLobbyPacket.call(a1);
     }
 
-    pub fn shutdown(&self) {
-        unsafe {
-            if let Some(hook) = self.lobby_hook.get() {
-                let _ = hook.disable();
-            };
+    pub fn shutdown() {
+        if let Err(e) = unsafe { SendLobbyPacket.disable() } {
+            error!("Error disabling SendLobby hook: {}", e);
         }
     }
 }

@@ -1,14 +1,10 @@
 use std::mem;
-use std::sync::Arc;
 
 use anyhow::Result;
 
 use tokio::sync::mpsc;
 
-use once_cell::sync::OnceCell;
-
-use retour;
-use retour::static_detour;
+use retour::{static_detour, StaticDetour};
 
 use crate::rpc;
 
@@ -22,6 +18,7 @@ use log::error;
 
 type HookedFunction =
     unsafe extern "system" fn(*const u8, *const u8, usize, usize, usize, usize) -> usize;
+type StaticHook = StaticDetour<HookedFunction>;
 
 static_detour! {
     static CompressPacketChat: unsafe extern "system" fn(*const u8, *const u8, usize, usize, usize, usize) -> usize;
@@ -31,10 +28,6 @@ static_detour! {
 #[derive(Clone)]
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
-
-    chat_hook: Arc<OnceCell<&'static retour::StaticDetour<HookedFunction>>>,
-    zone_hook: Arc<OnceCell<&'static retour::StaticDetour<HookedFunction>>>,
-
     wg: waitgroup::WaitGroup,
 }
 
@@ -43,12 +36,7 @@ impl Hook {
         data_tx: mpsc::UnboundedSender<rpc::Payload>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook> {
-        Ok(Hook {
-            data_tx,
-            chat_hook: Arc::new(OnceCell::new()),
-            zone_hook: Arc::new(OnceCell::new()),
-            wg,
-        })
+        Ok(Hook { data_tx, wg })
     }
 
     pub fn setup(&self, rvas: Vec<usize>) -> Result<()> {
@@ -57,35 +45,25 @@ impl Hook {
         }
         let mut ptrs: Vec<*const u8> = Vec::new();
         for rva in rvas {
-            ptrs.push(get_ffxiv_handle()?.wrapping_offset(rva as isize));
-        }
-
-        let self_clone = self.clone();
-        let chat_hook = unsafe {
-            let ptr_fn: HookedFunction = mem::transmute(ptrs[0] as *const ());
-            CompressPacketChat.initialize(ptr_fn, move |a, b, c, d, e, f| {
-                self_clone.compress_packet(Channel::Chat, a, b, c, d, e, f)
-            })?
-        };
-        if let Err(_) = self.chat_hook.set(chat_hook) {
-            return Err(HookError::SetupFailed(Channel::Chat).into());
-        }
-
-        let self_clone = self.clone();
-        let zone_hook = unsafe {
-            let ptr_fn: HookedFunction = mem::transmute(ptrs[1] as *const ());
-            CompressPacketZone.initialize(ptr_fn, move |a, b, c, d, e, f| {
-                self_clone.compress_packet(Channel::Zone, a, b, c, d, e, f)
-            })?
-        };
-        if let Err(_) = self.zone_hook.set(zone_hook) {
-            return Err(HookError::SetupFailed(Channel::Zone).into());
+            ptrs.push(get_ffxiv_handle()?.wrapping_add(rva));
         }
 
         unsafe {
-            self.chat_hook.get_unchecked().enable()?;
-            self.zone_hook.get_unchecked().enable()?;
+            self.setup_hook(&CompressPacketChat, Channel::Chat, ptrs[0])?;
+            self.setup_hook(&CompressPacketZone, Channel::Zone, ptrs[1])?;
+
+            CompressPacketChat.enable()?;
+            CompressPacketZone.enable()?;
         }
+        Ok(())
+    }
+
+    unsafe fn setup_hook(&self, hook: &StaticHook, channel: Channel, rva: *const u8) -> Result<()> {
+        let self_clone = self.clone();
+        let ptr_fn: HookedFunction = mem::transmute(rva as *const ());
+        hook.initialize(ptr_fn, move |a, b, c, d, e, f| {
+            self_clone.compress_packet(channel, a, b, c, d, e, f)
+        })?;
         Ok(())
     }
 
@@ -126,23 +104,20 @@ impl Hook {
             }
         }
 
-        const INVALID_MSG: &str = "Hook function was called without a valid hook";
         let hook = match channel {
-            Channel::Chat => self.chat_hook.clone(),
+            Channel::Chat => &CompressPacketChat,
             Channel::Lobby => panic!("Not implemented."),
-            Channel::Zone => self.zone_hook.clone(),
+            Channel::Zone => &CompressPacketZone,
         };
-        return hook.get().expect(INVALID_MSG).call(a1, a2, a3, a4, a5, a6);
+        return hook.call(a1, a2, a3, a4, a5, a6);
     }
 
-    pub fn shutdown(&self) {
-        unsafe {
-            if let Some(hook) = self.chat_hook.get() {
-                let _ = hook.disable();
-            };
-            if let Some(hook) = self.zone_hook.get() {
-                let _ = hook.disable();
-            };
+    pub fn shutdown() {
+        if let Err(e) = unsafe { CompressPacketChat.disable() } {
+            error!("Error disabling SendChat hook: {}", e);
+        }
+        if let Err(e) = unsafe { CompressPacketZone.disable() } {
+            error!("Error disabling SendZone hook: {}", e);
         }
     }
 }
