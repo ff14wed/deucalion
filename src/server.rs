@@ -89,6 +89,8 @@ where
     }
 }
 
+const HELLO_CHANNEL: u32 = 9000;
+
 fn dbg_payload(ctx: u32, data: Vec<u8>) -> Payload {
     let op = MessageOps::Debug;
     Payload { op, ctx, data }
@@ -101,6 +103,9 @@ fn ping_payload() -> Payload {
         data: Vec::new(),
     }
 }
+
+/// Checks to make sure that the UTF-8 string is 30 characters or less and is
+/// ASCII alphanumeric with underscores allowwed
 fn validate_nickname(nickname: &String) -> Result<()> {
     if nickname.len() > 30 {
         return Err(format_err!("Nickname exceeds 30 chars: {nickname:?}").into());
@@ -123,6 +128,8 @@ where
         Ok(())
     }
 
+    /// Handle the nickname sent from the subscriber and send a success/failure
+    /// response back.
     async fn handle_nickname(&mut self, payload: Payload, nickname: &mut String) -> Result<()>
     where
         T: AsyncRead + AsyncWrite + std::marker::Unpin,
@@ -259,8 +266,6 @@ impl State {
         )
     }
 }
-
-const HELLO_CHANNEL: u32 = 9000;
 
 #[derive(Clone)]
 pub struct Server {
