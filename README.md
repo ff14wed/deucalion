@@ -94,6 +94,9 @@ types:
 | 1       | Zone  |
 | 2       | Chat  |
 
+
+For the `Debug` OP, the CHANNEL 9000 indicates the `HELLO` CHANNEL.
+
 ### Data
 
 For payloads with OP `Debug`, the payload is simply debug-logged.
@@ -117,8 +120,25 @@ CHANNEL.
 
 ### Debug OP
 
-Any payload sent with the `Debug` OP will be simply be debug-logged and an `OK`
-response will be sent back to the requesting subscriber.
+Any payload sent with the `Debug` OP with a CHANNEL other than `HELLO` will be
+simply be debug-logged and an `OK` response will be sent back to the requesting
+subscriber.
+
+For payloads with the `Debug` OP and the `HELLO` channel, the DATA sent will
+be set as the nickname for the current subscriber.
+
+These are the restrictions on the values of nickname that are accepted:
+- The bytes in DATA must be valid UTF-8.
+- Must contain only ASCII alphanumeric characters or underscores (`^[A-Za-z0-9_]+$`)
+- Must be 30 characters or less
+- Names are allowed to be the same as other subscribers.
+
+For example:
+```c
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"TEST_CLIENT" }
+// Deucalion: Nickname set response
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"CHANGED NICKNAME: TEST_CLIENT (subscriber 0)" }
+```
 
 ### Ping OP
 
