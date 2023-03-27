@@ -43,7 +43,6 @@ const SEND_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
 const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
-    info!("Received payload from subscriber: {:?}", payload);
     if payload.op == rpc::MessageOps::Recv || payload.op == rpc::MessageOps::Send {
         let hook_type = match payload.op {
             rpc::MessageOps::Recv => hook::HookType::Recv,
@@ -189,7 +188,7 @@ fn logging_setup() -> Result<()> {
 
     #[cfg(debug_assertions)]
     {
-        let _ = CombinedLogger::init(vec![
+        CombinedLogger::init(vec![
             SimpleLogger::new(LevelFilter::Debug, simplelog::Config::default()),
             WriteLogger::new(LevelFilter::Debug, simplelog::Config::default(), log_file),
         ])?;
