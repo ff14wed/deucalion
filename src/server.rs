@@ -395,14 +395,14 @@ impl Server {
         let hello_string = self.state.lock().await.server_hello_string();
 
         let mut subscriber = Subscriber { id, frames, rx };
+        let mut nickname = format!("subscriber {}", subscriber.id);
 
         subscriber
             .send_dbg_payload(HELLO_CHANNEL, hello_string.into())
-            .await?;
+            .await
+            .map_err(|e| format_err!("Could not send SERVER HELLO to {nickname}: {e}"))?;
 
-        info!("New subscriber connected: {}", subscriber.id);
-
-        let mut nickname = format!("subscriber {}", subscriber.id);
+        info!("New subscriber connected: {nickname}");
 
         match self
             .subscriber_msg_loop(&mut subscriber, &mut nickname, payload_handler)
