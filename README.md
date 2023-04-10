@@ -1,6 +1,8 @@
 # Deucalion
 ![Test](https://github.com/ff14wed/deucalion/actions/workflows/test.yml/badge.svg)
 ![Build](https://github.com/ff14wed/deucalion/actions/workflows/build.yml/badge.svg)
+![MIT License](https://img.shields.io/crates/l/deucalion)
+![Crates.io](https://img.shields.io/crates/v/deucalion)
 
 High-performance Windows library for capturing decoded FFXIV packets. This
 library is fairly limited in scope and it is intended to be used in conjunction
