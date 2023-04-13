@@ -28,7 +28,7 @@ fn main() {
     }
 }
 
-fn scan_sigs(image: &[u8], sig_str: &String) -> Result<Vec<usize>> {
+fn scan_sigs(image: &[u8], sig_str: &str) -> Result<Vec<usize>> {
     let start = Instant::now();
     let file = PeView::from_bytes(image)?;
     info!("File load took {:?}", start.elapsed());

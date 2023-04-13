@@ -106,7 +106,7 @@ fn ping_payload() -> Payload {
 
 /// Checks to make sure that the UTF-8 string is 30 characters or less and is
 /// ASCII alphanumeric with underscores allowwed
-fn validate_nickname(nickname: &String) -> Result<()> {
+fn validate_nickname(nickname: &str) -> Result<()> {
     if nickname.len() > 30 {
         return Err(format_err!("Nickname exceeds 30 chars: {nickname:?}").into());
     }

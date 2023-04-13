@@ -16,7 +16,7 @@ async fn main() {
     signal_pipe(&pipe_name).await;
 }
 
-async fn signal_pipe(pipe_name: &String) {
+async fn signal_pipe(pipe_name: &str) {
     let subscriber = Endpoint::connect(pipe_name)
         .await
         .expect("Failed to connect subscriber to server");
