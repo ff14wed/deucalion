@@ -40,7 +40,7 @@ pub fn get_ffxiv_handle() -> Result<*const u8> {
         if handle_ffxiv.is_null() {
             return Err(ProcLoaderError::ModuleNotFound { name: "ffxiv" }.into());
         }
-        return Ok(handle_ffxiv);
+        Ok(handle_ffxiv)
     }
 }
 
@@ -90,7 +90,7 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
     } else {
         search_start_rva
     };
-    start = start + excerpt_offset;
+    start += excerpt_offset;
 
     let end = image_range.end as usize;
     debug!(
@@ -141,18 +141,18 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
             break;
         }
 
-        let mut deepest = 0;
-        for i in 0..8 {
-            if save[i] > 0 {
-                deepest = i
+        let mut deepest_match = 0;
+        for m in save {
+            if m > 0 {
+                deepest_match = m
             }
         }
 
-        if save[deepest] == 0 {
+        if deepest_match == 0 {
             return Err(SigScanError::InvalidMatch { name }.into());
         }
 
-        let rva: usize = save[deepest].try_into()?;
+        let rva: usize = deepest_match as usize;
         addrs.push(rva);
 
         start_rva = save[0] as usize + 1;
@@ -276,7 +276,7 @@ fn get_pat_len_and_excerpt(pat: &[pat::Atom]) -> Result<(usize, Vec<u8>, usize)>
         }
     }
     let excerpt_len = excerpt.len();
-    return Ok((pat_len, excerpt, offset - excerpt_len));
+    Ok((pat_len, excerpt, offset - excerpt_len))
 }
 
 #[cfg(test)]

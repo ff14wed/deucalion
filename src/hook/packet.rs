@@ -1,4 +1,5 @@
 use core::slice;
+use std::mem;
 
 use anyhow::{format_err, Result};
 use binary_layout::prelude::*;
@@ -54,7 +55,7 @@ define_layout!(deucalion_segment, LittleEndian, {
 });
 
 pub(super) enum Packet {
-    IPC(Vec<u8>),
+    Ipc(Vec<u8>),
     Other(Vec<u8>),
 }
 
@@ -111,8 +112,8 @@ pub(super) unsafe fn extract_packets_from_frame(ptr_frame: *const u8) -> Result<
             let payload_len = segment_size as usize - segment_header_size + deucalion_header_size;
 
             let mut dst = Vec::<u8>::with_capacity(payload_len);
-            dst.set_len(payload_len);
-            let buf: &mut [u8] = dst.as_mut();
+            let buf = dst.spare_capacity_mut();
+            let buf: &mut [u8] = mem::transmute(buf);
             let mut deucalion_segment = deucalion_segment::View::new(buf);
             let mut dsh = deucalion_segment.header_mut();
             dsh.source_actor_mut()
@@ -123,15 +124,13 @@ pub(super) unsafe fn extract_packets_from_frame(ptr_frame: *const u8) -> Result<
 
             deucalion_segment.data_mut().copy_from_slice(segment.data());
 
-            packets.push(Packet::IPC(dst));
+            dst.set_len(payload_len);
+            packets.push(Packet::Ipc(dst));
         } else {
             // Otherwise just copy the segment as-is
-            let mut dst = Vec::<u8>::with_capacity(segment_bytes.len());
-            dst.set_len(segment_bytes.len());
-            dst.copy_from_slice(segment_bytes);
-
+            let dst = Vec::from(segment_bytes);
             packets.push(Packet::Other(dst));
         }
     }
-    return Ok(packets);
+    Ok(packets)
 }

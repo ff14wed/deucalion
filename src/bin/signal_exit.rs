@@ -12,7 +12,7 @@ async fn main() {
     }
     let process_id = &args[1].parse::<u32>().unwrap();
 
-    let pipe_name = format!(r"\\.\pipe\deucalion-{}", process_id);
+    let pipe_name = format!(r"\\.\pipe\deucalion-{process_id}");
     signal_pipe(&pipe_name).await;
 }
 

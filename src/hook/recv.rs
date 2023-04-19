@@ -98,7 +98,7 @@ impl Hook {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
-                        packet::Packet::IPC(data) => rpc::Payload {
+                        packet::Packet::Ipc(data) => rpc::Payload {
                             op: rpc::MessageOps::Recv,
                             ctx: channel as u32,
                             data,
@@ -117,7 +117,7 @@ impl Hook {
             }
         }
 
-        return ret;
+        ret
     }
 
     pub fn shutdown() {

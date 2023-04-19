@@ -39,9 +39,9 @@ pub struct Payload {
 }
 
 impl From<Bytes> for Payload {
-    fn from(data: Bytes) -> Payload {
+    fn from(data: Bytes) -> Self {
         let mut b = data;
-        Payload {
+        Self {
             op: b.get_u8().into(),
             ctx: b.get_u32_le(),
             data: b.to_vec(),
@@ -49,12 +49,12 @@ impl From<Bytes> for Payload {
     }
 }
 
-impl Into<Bytes> for Payload {
-    fn into(self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(9 + self.data.len());
-        buf.put_u8(self.op as u8);
-        buf.put_u32_le(self.ctx);
-        buf.put(self.data.as_slice());
+impl From<Payload> for Bytes {
+    fn from(val: Payload) -> Self {
+        let mut buf = BytesMut::with_capacity(9 + val.data.len());
+        buf.put_u8(val.op as u8);
+        buf.put_u32_le(val.ctx);
+        buf.put(val.data.as_slice());
         buf.freeze()
     }
 }
@@ -75,6 +75,12 @@ impl PayloadCodec {
     }
 }
 
+impl Default for PayloadCodec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Decoder for PayloadCodec {
     type Item = Payload;
     type Error = io::Error;
@@ -90,8 +96,8 @@ impl Decoder for PayloadCodec {
 impl Encoder<Payload> for PayloadCodec {
     type Error = io::Error;
 
-    fn encode(&mut self, data: Payload, mut dst: &mut BytesMut) -> Result<(), io::Error> {
-        Ok(self.ld_codec.encode(data.into(), &mut dst)?)
+    fn encode(&mut self, data: Payload, dst: &mut BytesMut) -> Result<(), io::Error> {
+        self.ld_codec.encode(data.into(), dst)
     }
 }
 

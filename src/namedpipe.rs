@@ -63,7 +63,7 @@ impl Endpoint {
 
         let stream =
             futures::stream::try_unfold((pipe, self), |(listener, mut endpoint)| async move {
-                let () = listener.connect().await?;
+                listener.connect().await?;
 
                 let new_listener = endpoint.create_listener()?;
 

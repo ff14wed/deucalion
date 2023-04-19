@@ -57,7 +57,7 @@ impl State {
         let hs = State {
             recv_hook: recv::Hook::new(broadcast_tx.clone(), wg.clone())?,
             send_hook: send::Hook::new(broadcast_tx.clone(), wg.clone())?,
-            send_lobby_hook: send_lobby::Hook::new(broadcast_tx.clone(), wg.clone())?,
+            send_lobby_hook: send_lobby::Hook::new(broadcast_tx, wg.clone())?,
             wg,
             broadcast_rx: Arc::new(Mutex::new(broadcast_rx)),
         };
@@ -65,8 +65,7 @@ impl State {
     }
 
     pub fn initialize_hook(&self, sig_str: String, hook_type: HookType) -> Result<()> {
-        let pat =
-            pattern::parse(&sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
+        let pat = pattern::parse(&sig_str).context(format!("Invalid signature: \"{sig_str}\""))?;
         let sig: &[pattern::Atom] = &pat;
         let ffxiv_file_path = get_ffxiv_filepath()?;
 

@@ -21,7 +21,7 @@ fn main() {
     info!("Searching for sig {} in file {}", sig, target_exe_path);
 
     let image_map = ImageMap::open(target_exe_path).unwrap();
-    let addrs = scan_sigs(image_map.as_ref(), &sig).unwrap();
+    let addrs = scan_sigs(image_map.as_ref(), sig).unwrap();
     info!("Found addresses:");
     for addr in addrs {
         info!("{:x}", addr);
@@ -34,7 +34,7 @@ fn scan_sigs(image: &[u8], sig_str: &str) -> Result<Vec<usize>> {
     info!("File load took {:?}", start.elapsed());
 
     let start = Instant::now();
-    let pat = pattern::parse(sig_str).context(format!("Invalid signature: \"{}\"", sig_str))?;
+    let pat = pattern::parse(sig_str).context(format!("Invalid signature: \"{sig_str}\""))?;
     let sig: &[pattern::Atom] = &pat;
 
     let rvas = procloader::find_pattern_matches("", sig, file)

@@ -67,6 +67,7 @@ impl Hook {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     unsafe fn compress_packet(
         &self,
         channel: Channel,
@@ -85,7 +86,7 @@ impl Hook {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
-                        packet::Packet::IPC(data) => rpc::Payload {
+                        packet::Packet::Ipc(data) => rpc::Payload {
                             op: rpc::MessageOps::Send,
                             ctx: channel as u32,
                             data,
@@ -109,7 +110,7 @@ impl Hook {
             Channel::Lobby => panic!("Not implemented."),
             Channel::Zone => &CompressPacketZone,
         };
-        return hook.call(a1, a2, a3, a4, a5, a6);
+        hook.call(a1, a2, a3, a4, a5, a6)
     }
 
     pub fn shutdown() {

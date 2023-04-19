@@ -108,13 +108,15 @@ fn ping_payload() -> Payload {
 /// ASCII alphanumeric with underscores allowwed
 fn validate_nickname(nickname: &str) -> Result<()> {
     if nickname.len() > 30 {
-        return Err(format_err!("Nickname exceeds 30 chars: {nickname:?}").into());
+        return Err(format_err!("Nickname exceeds 30 chars: {nickname:?}"));
     }
     if !nickname
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
-        return Err(format_err!("Nickname contains invalid characters: {nickname:?}").into());
+        return Err(format_err!(
+            "Nickname contains invalid characters: {nickname:?}"
+        ));
     }
     Ok(())
 }
@@ -193,6 +195,7 @@ where
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[repr(u32)]
 enum BroadcastFilter {
     AllowLobbyRecv = 1,
@@ -241,7 +244,7 @@ impl State {
     fn claim_id(&mut self) -> usize {
         let original = self.counter;
         self.counter += 1;
-        return original;
+        original
     }
 
     /// Adds a new subscriber to the server and returns the subscriber ID and a
@@ -253,6 +256,7 @@ impl State {
         (id, rx)
     }
 
+    #[allow(clippy::needless_return)]
     fn hook_status_string(status: bool) -> &'static str {
         return if status { "ON" } else { "OFF" };
     }
@@ -428,7 +432,7 @@ impl Server {
             let mut state = self.state.lock().await;
             state.subscribers.remove(&subscriber.id);
             // Exit once all subscribers are disconnected
-            if state.subscribers.len() == 0 {
+            if state.subscribers.is_empty() {
                 info!("Shutting down server because last subscriber disconnected");
                 self.shutdown().await;
             }

@@ -23,8 +23,6 @@ use anyhow::{format_err, Context, Result};
 use tokio::select;
 use tokio::sync::oneshot;
 
-use dirs;
-
 mod hook;
 
 pub mod namedpipe;
@@ -122,14 +120,14 @@ async fn main_with_result() -> Result<()> {
                 },
                 _ = &mut shutdown_rx => {
                     hs_clone.shutdown();
-                    return ();
+                    return;
                 }
             }
         }
     });
 
     let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
-    let pipe_name = format!(r"\\.\pipe\deucalion-{}", pid as u32);
+    let pipe_name = format!(r"\\.\pipe\deucalion-{pid}");
 
     info!("Starting server on {}", pipe_name);
     // Block on server loop
@@ -153,7 +151,7 @@ async fn main_with_result() -> Result<()> {
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub unsafe extern "system" fn DllMain(hModule: HINSTANCE, reason: u32, _: u32) -> BOOL {
+unsafe extern "system" fn DllMain(hModule: HINSTANCE, reason: u32, _: u32) -> BOOL {
     if reason == 1 {
         processthreadsapi::CreateThread(
             0 as LPSECURITY_ATTRIBUTES,
@@ -182,7 +180,7 @@ fn logging_setup() -> Result<()> {
     log_path.push("deucalion");
     fs::create_dir_all(log_path.as_path())?;
 
-    log_path.push(format!("session-{}.log", secs_since_epoch));
+    log_path.push(format!("session-{secs_since_epoch}.log"));
 
     let log_file = File::create(log_path.as_path())?;
 
@@ -206,17 +204,17 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
     consoleapi::AllocConsole();
 
     if let Err(e) = logging_setup() {
-        println!("Error initializing logger: {:?}", e);
+        println!("Error initializing logger: {e:?}");
     }
 
     let result = panic::catch_unwind(|| {
         if let Err(e) = main_with_result() {
-            error!("Encountered fatal error: {:?}", e);
+            error!("Encountered fatal error: {e:?}");
             pause();
         }
     });
     if let Err(cause) = result {
-        error!("Panic happened: {:?}", cause);
+        error!("Panic happened: {cause:?}");
         pause();
     }
     info!("Shut down!");
@@ -224,5 +222,5 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
     wincon::FreeConsole();
     libloaderapi::FreeLibraryAndExitThread(dll_base_addr as HMODULE, 0);
     // Exit should happen before here
-    return 0;
+    0
 }

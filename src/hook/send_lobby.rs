@@ -4,7 +4,6 @@ use anyhow::Result;
 
 use tokio::sync::mpsc;
 
-use retour;
 use retour::{static_detour, StaticDetour};
 
 use crate::rpc;
@@ -68,7 +67,7 @@ impl Hook {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
-                        packet::Packet::IPC(data) => rpc::Payload {
+                        packet::Packet::Ipc(data) => rpc::Payload {
                             op: rpc::MessageOps::Send,
                             ctx: Channel::Lobby as u32,
                             data,
@@ -87,7 +86,7 @@ impl Hook {
             }
         }
 
-        return SendLobbyPacket.call(a1);
+        SendLobbyPacket.call(a1)
     }
 
     pub fn shutdown() {
