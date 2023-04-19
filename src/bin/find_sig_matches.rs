@@ -18,13 +18,13 @@ fn main() {
 
     let target_exe_path = &args[1];
     let sig = &args[2];
-    info!("Searching for sig {} in file {}", sig, target_exe_path);
+    info!("Searching for sig {sig} in file {target_exe_path}");
 
     let image_map = ImageMap::open(target_exe_path).unwrap();
     let addrs = scan_sigs(image_map.as_ref(), sig).unwrap();
     info!("Found addresses:");
     for addr in addrs {
-        info!("{:x}", addr);
+        info!("{addr:x}");
     }
 }
 

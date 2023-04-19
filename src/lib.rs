@@ -54,8 +54,8 @@ fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
             _ => panic!("This case shouldn't be possible"),
         };
         if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data, hook_type) {
-            let err = format_err!("error initializing hook: {:?}", e);
-            error!("{:?}", err);
+            let err = format_err!("error initializing hook: {e}");
+            error!("{err}");
             return Err(err);
         }
     }
@@ -73,7 +73,7 @@ fn parse_sig_and_initialize_hook(
 
 fn initialize_hook_with_sig(hs: &Arc<hook::State>, sig: &str, hook_type: hook::HookType) -> bool {
     if let Err(e) = hs.initialize_hook(sig.into(), hook_type) {
-        error!("Could not auto-initialize the {} hook: {}", hook_type, e);
+        error!("Could not auto-initialize the {hook_type} hook: {e}");
         false
     } else {
         true
@@ -129,7 +129,7 @@ async fn main_with_result() -> Result<()> {
     let pid = unsafe { processthreadsapi::GetCurrentProcessId() };
     let pipe_name = format!(r"\\.\pipe\deucalion-{pid}");
 
-    info!("Starting server on {}", pipe_name);
+    info!("Starting server on {pipe_name}");
     // Block on server loop
     let hs_clone = hs.clone();
     if let Err(e) = deucalion_server
@@ -138,7 +138,7 @@ async fn main_with_result() -> Result<()> {
         })
         .await
     {
-        error!("Server encountered error running: {:?}", e)
+        error!("Server encountered error running: {e}")
     }
 
     // Signal the msg loop to exit and shut down the hook
@@ -204,12 +204,12 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
     consoleapi::AllocConsole();
 
     if let Err(e) = logging_setup() {
-        println!("Error initializing logger: {e:?}");
+        println!("Error initializing logger: {e}");
     }
 
     let result = panic::catch_unwind(|| {
         if let Err(e) = main_with_result() {
-            error!("Encountered fatal error: {e:?}");
+            error!("Encountered fatal error: {e}");
             pause();
         }
     });

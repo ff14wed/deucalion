@@ -113,7 +113,7 @@ impl Hook {
                 }
             }
             Err(e) => {
-                error!("Could not process packet: {}", e)
+                error!("Could not process packet: {e}")
             }
         }
 
@@ -122,13 +122,13 @@ impl Hook {
 
     pub fn shutdown() {
         if let Err(e) = unsafe { DecompressPacketChat.disable() } {
-            error!("Error disabling RecvChat hook: {}", e);
+            error!("Error disabling RecvChat hook: {e}");
         };
         if let Err(e) = unsafe { DecompressPacketLobby.disable() } {
-            error!("Error disabling RecvLobby hook: {}", e);
+            error!("Error disabling RecvLobby hook: {e}");
         };
         if let Err(e) = unsafe { DecompressPacketZone.disable() } {
-            error!("Error disabling RecvZone hook: {}", e);
+            error!("Error disabling RecvZone hook: {e}");
         };
     }
 }

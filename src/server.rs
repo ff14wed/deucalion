@@ -366,7 +366,7 @@ impl Server {
                         }
                     }
                     _ => {
-                        info!("Received payload from {nickname}: {:?}", payload);
+                        info!("Received payload from {nickname}: {payload:?}");
                         subscriber.handle_payload(payload, &payload_handler).await?;
                     }
                 },
@@ -422,13 +422,13 @@ impl Server {
                     return Ok(());
                 }
             }
-            Err(e) => error!("Disconecting {} because of error: {}", nickname, e),
+            Err(e) => error!("Disconecting {nickname} because of error: {e}"),
         }
 
         // If this section is reached it means that the subscriber was
         // disconnected one way or another.
         {
-            info!("Disconnected: {}", nickname);
+            info!("Disconnected: {nickname}");
             let mut state = self.state.lock().await;
             state.subscribers.remove(&subscriber.id);
             // Exit once all subscribers are disconnected
@@ -498,11 +498,11 @@ impl Server {
                     let self_clone = self.clone();
                     subscriber_set.spawn(async move {
                         if let Err(e) = self_clone.handle_subscriber(stream, handler).await {
-                            error!("Error occurred when processing stream = {:?}", e);
+                            error!("Error occurred when processing stream = {e}");
                         }
                     });
                 }
-                Err(e) => error!("Unable to connect to subscriber: {}", e),
+                Err(e) => error!("Unable to connect to subscriber: {e}"),
             }
         }
 

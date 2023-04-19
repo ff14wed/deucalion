@@ -94,8 +94,7 @@ pub fn fast_pattern_scan<'a, P: Pe<'a>>(
 
     let end = image_range.end as usize;
     debug!(
-        "Using pat len {:?} and excerpt {:x?} with excerpt_offset {:?}",
-        pat_len, excerpt, excerpt_offset,
+        "Using pat len {pat_len:?} and excerpt {excerpt:x?} with excerpt_offset {excerpt_offset:?}"
     );
     let finder = memmem::Finder::new(excerpt.as_slice());
 
@@ -161,7 +160,7 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
     if addrs.is_empty() {
         return Err(SigScanError::MatchNotFound { name }.into());
     }
-    info!("Found {} addr(s): {:x?}", name, addrs);
+    info!("Found {name} addr(s): {addrs:x?}");
     Ok(addrs)
 }
 

@@ -101,7 +101,7 @@ impl Hook {
                 }
             }
             Err(e) => {
-                error!("Could not process packet: {}", e)
+                error!("Could not process packet: {e}")
             }
         }
 
@@ -115,10 +115,10 @@ impl Hook {
 
     pub fn shutdown() {
         if let Err(e) = unsafe { CompressPacketChat.disable() } {
-            error!("Error disabling SendChat hook: {}", e);
+            error!("Error disabling SendChat hook: {e}");
         }
         if let Err(e) = unsafe { CompressPacketZone.disable() } {
-            error!("Error disabling SendZone hook: {}", e);
+            error!("Error disabling SendZone hook: {e}");
         }
     }
 }
