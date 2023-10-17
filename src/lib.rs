@@ -36,6 +36,8 @@ use log::{error, info};
 #[cfg(debug_assertions)]
 use simplelog::{CombinedLogger, SimpleLogger};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 const RECV_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
 const SEND_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
 const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
@@ -91,6 +93,7 @@ fn auto_initialize_hooks(hs: &Arc<hook::State>) -> (bool, bool, bool) {
 
 #[tokio::main]
 async fn main_with_result() -> Result<()> {
+    info!("Starting Deucalion v{VERSION}");
     let hs = Arc::new(hook::State::new().context("error setting up the hook")?);
     let deucalion_server = server::Server::new();
 
