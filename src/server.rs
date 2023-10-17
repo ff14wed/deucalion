@@ -733,10 +733,7 @@ mod tests {
     async fn test_subscriber_nickname() {
         let (_, pipe_name, server_handle) = run_server().await;
 
-        struct Testcase {
-            nickname: Vec<u8>,
-            expected_resp: &'static str,
-        }
+        // (nickname, expected message)
         let testcases: Vec<(Vec<u8>, &str)> = vec![
             (
                 "Inquisitor1234".into(),
