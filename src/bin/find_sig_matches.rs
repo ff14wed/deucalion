@@ -6,7 +6,7 @@ use std::{env, time::Instant};
 use anyhow::{format_err, Context, Result};
 
 use log::info;
-use simplelog::{self, LevelFilter, SimpleLogger};
+use simplelog::{LevelFilter, SimpleLogger};
 
 fn main() {
     SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default()).unwrap();

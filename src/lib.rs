@@ -4,7 +4,7 @@ use std::panic;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use simplelog::{self, LevelFilter, WriteLogger};
+use simplelog::{LevelFilter, WriteLogger};
 #[cfg(windows)]
 use winapi::shared::minwindef::*;
 use winapi::um::libloaderapi;
