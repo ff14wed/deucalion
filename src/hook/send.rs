@@ -16,13 +16,12 @@ use super::{Channel, HookError};
 
 use log::error;
 
-type HookedFunction =
-    unsafe extern "system" fn(*const u8, *const u8, usize, usize, usize, usize) -> usize;
+type HookedFunction = unsafe extern "system" fn(*const u8, usize) -> usize;
 type StaticHook = StaticDetour<HookedFunction>;
 
 static_detour! {
-    static CompressPacketChat: unsafe extern "system" fn(*const u8, *const u8, usize, usize, usize, usize) -> usize;
-    static CompressPacketZone: unsafe extern "system" fn(*const u8, *const u8, usize, usize, usize, usize) -> usize;
+    static CompressPacketChat: unsafe extern "system" fn(*const u8, usize) -> usize;
+    static CompressPacketZone: unsafe extern "system" fn(*const u8, usize) -> usize;
 }
 
 #[derive(Clone)]
@@ -61,26 +60,17 @@ impl Hook {
     unsafe fn setup_hook(&self, hook: &StaticHook, channel: Channel, rva: *const u8) -> Result<()> {
         let self_clone = self.clone();
         let ptr_fn: HookedFunction = mem::transmute(rva as *const ());
-        hook.initialize(ptr_fn, move |a, b, c, d, e, f| {
-            self_clone.compress_packet(channel, a, b, c, d, e, f)
+        hook.initialize(ptr_fn, move |a, b| {
+            self_clone.compress_packet(channel, a, b)
         })?;
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    unsafe fn compress_packet(
-        &self,
-        channel: Channel,
-        a1: *const u8,
-        a2: *const u8,
-        a3: usize,
-        a4: usize,
-        a5: usize,
-        a6: usize,
-    ) -> usize {
+    unsafe fn compress_packet(&self, channel: Channel, a1: *const u8, a2: usize) -> usize {
         let _guard = self.wg.add();
 
-        let ptr_frame: *const u8 = *(a1.add(16) as *const usize) as *const u8;
+        let ptr_frame: *const u8 = *(a1.add(32) as *const usize) as *const u8;
 
         match packet::extract_packets_from_frame(ptr_frame) {
             Ok(packets) => {
@@ -110,7 +100,7 @@ impl Hook {
             Channel::Lobby => panic!("Not implemented."),
             Channel::Zone => &CompressPacketZone,
         };
-        hook.call(a1, a2, a3, a4, a5, a6)
+        hook.call(a1, a2)
     }
 
     pub fn shutdown() {

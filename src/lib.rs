@@ -38,8 +38,8 @@ use simplelog::{CombinedLogger, SimpleLogger};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const RECV_SIG: &str = "E8 $ { ' } 4C 8B 43 10 41 8B 40 18";
-const SEND_SIG: &str = "E8 $ { ' } 8B 53 2C 48 8D 8B";
+const RECV_SIG: &str = "E8 $ { ' } 4C 8B 4F 10 8B 47 1C 45";
+const SEND_SIG: &str = "40 57 41 56 48 83 EC 38 48 8B F9 4C 8B F2";
 const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
