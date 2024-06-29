@@ -263,7 +263,8 @@ impl State {
 
     fn server_hello_string(&self) -> String {
         format!(
-            "SERVER HELLO. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+            "SERVER HELLO. VERSION: {}. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+            crate::VERSION,
             Self::hook_status_string(self.recv_hooked),
             Self::hook_status_string(self.send_hooked),
             Self::hook_status_string(self.send_lobby_hooked),
@@ -593,8 +594,11 @@ mod tests {
 
         let fmt_msg = |a, b, c| {
             format!(
-                "SERVER HELLO. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
-                a, b, c
+                "SERVER HELLO. VERSION: {}. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+                crate::VERSION,
+                a,
+                b,
+                c
             )
         };
         let combinations = vec![
