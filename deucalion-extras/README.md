@@ -1,6 +1,6 @@
 # Various Scripts
 
-This folder contains a bunch of scripts for development purposes.
+This crate contains a bunch of scripts for development purposes.
 Run them from the repo root folder with `cargo run --bin ${SCRIPT_NAME}`
 or compile them if you want.
 

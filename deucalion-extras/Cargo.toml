@@ -1,0 +1,22 @@
+
+[package]
+name = "deucalion-extras"
+version = "1.0.0"
+authors = ["ff14wed"]
+edition = "2021"
+license = "GPL-3.0"
+description = "Various utilities for manual validation of deucalion."
+homepage = "https://github.com/ff14wed/deucalion"
+repository = "https://github.com/ff14wed/deucalion"
+readme = "README.md"
+keywords = ["ffxiv", "windows", "dll-injection", "dll"]
+
+[dependencies]
+deucalion = { path = "../deucalion" }
+tokio = { version = "1.38.0", features = ["rt", "macros"] }
+tokio-util = { version = "0.7.11", features = ["codec", "compat"] }
+futures = "0.3"
+anyhow = "1.0"
+log = "0.4"
+simplelog = "0.12"
+pelite = "0.10"
