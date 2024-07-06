@@ -31,6 +31,13 @@ struct Args {
         help = "Call LoadLibrary even if the target is already injected."
     )]
     force: bool,
+
+    #[arg(
+        short,
+        long,
+        help = "Attempt to eject Deucalion from the target process. MAY CRASH GAME IF DEUCALION IS STILL RUNNING."
+    )]
+    eject: bool,
 }
 
 fn main() -> Result<()> {
@@ -39,9 +46,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let payload_path = std::path::Path::new(&args.payload);
-    if !payload_path.exists() {
-        return Err(format_err!("Payload {} not found!", &args.payload));
-    }
+
     let target_name = match args.target_exe {
         Some(target) => target,
         None => "ffxiv_dx11.exe".into(),
@@ -59,7 +64,18 @@ fn main() -> Result<()> {
 
     info!("Selecting pid {pid}");
 
+    if args.eject {
+        info!("Ejecting Deucalion from {pid}");
+        process::eject_dll(pid, &payload_path)?;
+        return Ok(());
+    }
+
     info!("Injecting Deucalion into {pid}");
+
+    if !payload_path.exists() {
+        return Err(format_err!("Payload {} not found!", &args.payload));
+    }
+
     process::copy_current_process_dacl_to_target(pid)?;
     process::inject_dll(pid, &payload_path, args.force)?;
 
