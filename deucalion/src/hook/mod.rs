@@ -37,14 +37,14 @@ pub enum HookType {
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
-pub(self) enum Channel {
+enum Channel {
     Lobby,
     Zone,
     Chat,
 }
 
 #[derive(Debug, Error)]
-pub(self) enum HookError {
+enum HookError {
     #[error("number of signature matches is incorrect: {0} != {1}")]
     SignatureMatchFailed(usize, usize),
 }

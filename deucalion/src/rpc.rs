@@ -164,8 +164,8 @@ mod tests {
             let payload_op = payload.op as u8;
             codec.encode(payload, &mut buf).unwrap();
             let expected: &[u8] = &[12, 0, 0, 0, payload_op, 100, 0, 0, 0, 1, 2, 3];
-            let mut dst: &mut [u8] = &mut [0; 12];
-            buf.copy_to_slice(&mut dst);
+            let dst: &mut [u8] = &mut [0; 12];
+            buf.copy_to_slice(dst);
             assert_eq!(dst, expected);
         }
     }
