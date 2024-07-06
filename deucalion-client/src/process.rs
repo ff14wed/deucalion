@@ -9,7 +9,10 @@ use std::{
 use anyhow::{format_err, Result};
 use log::debug;
 
-use dll_syringe::{process::OwnedProcess, Syringe};
+use dll_syringe::{
+    process::{OwnedProcess, Process},
+    Syringe,
+};
 use winapi::{
     shared::winerror::ERROR_SUCCESS,
     um::{
@@ -44,6 +47,21 @@ pub fn inject_dll<P: AsRef<Path>>(target_pid: usize, payload_path: P, force: boo
     } else {
         syringe.find_or_inject(payload_path)?;
     };
+    Ok(())
+}
+
+pub fn eject_dll<P: AsRef<Path>>(target_pid: usize, payload_path: P) -> Result<()> {
+    let target_process = OwnedProcess::from_pid(target_pid as u32)?;
+    let syringe = Syringe::for_process(target_process);
+    let payload_name = payload_path
+        .as_ref()
+        .file_name()
+        .ok_or(format_err!("Could not get filename from payload path"))?;
+    let module = syringe
+        .process()
+        .find_module_by_name(payload_name)?
+        .ok_or(format_err!("Payload not found in target process"))?;
+    syringe.eject(module)?;
     Ok(())
 }
 
