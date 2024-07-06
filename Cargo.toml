@@ -63,7 +63,7 @@ winapi = { version = "0.3", features = [
 ] }
 
 [dev-dependencies]
-ntest = "*"
+ntest = "0.9"
 rand = "0.8.5"
 
 [build-dependencies]
