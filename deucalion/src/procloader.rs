@@ -71,9 +71,9 @@ pub fn get_ffxiv_filepath() -> Result<String> {
 /// * `pat` - pattern to match
 /// * `pe` - the PE to search through
 /// * `save` - each level of the result is saved as additional entries in this
-/// array
+///   array
 /// * `search_start_rva` - Optionally specify that the search range starts at a
-/// different relative virtual address. Set to 0 for starting at the beginning.
+///   different relative virtual address. Set to 0 for starting at the beginning.
 pub fn fast_pattern_scan<'a, P: Pe<'a>>(
     pat: &[pat::Atom],
     pe: P,
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_incorrect_pat_len() {
-        if let Ok(_) = get_pat_len_and_excerpt(BAD_SIG) {
+        if get_pat_len_and_excerpt(BAD_SIG).is_ok() {
             panic!("Bad sig should return error");
         }
     }

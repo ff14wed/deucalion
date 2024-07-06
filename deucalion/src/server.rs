@@ -524,7 +524,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
-    use ntest::timeout;
+    use ntest::{assert_false, assert_true, timeout};
     use rand::Rng;
     use tokio::{select, task::JoinHandle};
 
@@ -544,9 +544,9 @@ mod tests {
         const ALLOW_EVERYTHING: u32 = 0xFF;
         for (filter, op, ctx) in configurations {
             let filter = filter as u32;
-            assert_eq!(allow_broadcast(op, ctx, ALLOW_EVERYTHING), true);
-            assert_eq!(allow_broadcast(op, ctx, filter), true);
-            assert_eq!(allow_broadcast(op, ctx, ALLOW_EVERYTHING & !filter), false);
+            assert_true!(allow_broadcast(op, ctx, ALLOW_EVERYTHING));
+            assert_true!(allow_broadcast(op, ctx, filter));
+            assert_false!(allow_broadcast(op, ctx, ALLOW_EVERYTHING & !filter));
         }
     }
 
@@ -573,7 +573,7 @@ mod tests {
             ),
         ];
         for (nickname, expected_err) in nickname_tests {
-            match validate_nickname(&nickname.to_string()) {
+            match validate_nickname(nickname) {
                 Ok(()) => {
                     if let Some(err_msg) = expected_err {
                         panic!("Expected validation for {nickname} to error with {err_msg}");
@@ -718,10 +718,10 @@ mod tests {
 
                 select! {
                     data = frames.next() => {
-                        assert_eq!(should_be_allowed, true, "packet should be filtered: {:?}", data);
+                        assert!(should_be_allowed, "packet should be filtered: {:?}", data);
                     }
                     _ = time::sleep(Duration::from_millis(100)) => {
-                        assert_eq!(should_be_allowed, false, "packet should not be filtered: {:?}: {}", op, ctx)
+                        assert!(!should_be_allowed, "packet should not be filtered: {:?}: {}", op, ctx)
                     }
                 }
             }
@@ -849,8 +849,7 @@ mod tests {
 
         handle_server_hello(&mut frames).await;
 
-        let subscriber_handle =
-            tokio::spawn(async move { while let Some(_) = frames.next().await {} });
+        let subscriber_handle = tokio::spawn(async move { while frames.next().await.is_some() {} });
 
         // Disconnect the subscriber forcefully
         subscriber_handle.abort();
@@ -899,7 +898,7 @@ mod tests {
 
             let codec = PayloadCodec::new();
             let mut frames = Framed::new(subscriber, codec);
-            while let Some(_) = frames.next().await {}
+            while frames.next().await.is_some() {}
         });
         second_subscriber.abort();
 
@@ -994,7 +993,7 @@ mod tests {
                 if let Ok(subscriber) = Endpoint::connect(&pipe_name_clone).await {
                     let codec = PayloadCodec::new();
                     let mut frames = Framed::new(subscriber, codec);
-                    while let Some(_) = frames.next().await {}
+                    while frames.next().await.is_some() {}
                 }
             });
             sub_handle.abort();
