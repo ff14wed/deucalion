@@ -64,7 +64,7 @@ fn main() -> Result<()> {
 
     if args.eject {
         info!("Ejecting Deucalion from {pid}");
-        process::eject_dll(pid, &payload_path)?;
+        process::eject_dll(pid, payload_path)?;
         return Ok(());
     }
 
@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     }
 
     process::copy_current_process_dacl_to_target(pid)?;
-    process::inject_dll(pid, &payload_path, args.force)?;
+    process::inject_dll(pid, payload_path, args.force)?;
 
     let subscriber = Subscriber::new();
 

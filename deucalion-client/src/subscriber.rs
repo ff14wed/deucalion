@@ -105,6 +105,12 @@ pub struct Subscriber {
     shutdown_tx: Arc<OnceCell<mpsc::Sender<()>>>,
 }
 
+impl Default for Subscriber {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Subscriber {
     pub fn new() -> Self {
         Self {
