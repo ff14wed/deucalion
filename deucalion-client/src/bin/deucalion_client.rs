@@ -2,9 +2,7 @@ use anyhow::{format_err, Result};
 
 use log::{error, info};
 
-use simplelog::LevelFilter;
-
-use simplelog::SimpleLogger;
+use simplelog::{LevelFilter, SimpleLogger};
 
 use tokio::runtime::Runtime;
 
@@ -41,7 +39,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    SimpleLogger::new(LevelFilter::Debug, simplelog::Config::default());
+    SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default())?;
 
     let args = Args::parse();
 
