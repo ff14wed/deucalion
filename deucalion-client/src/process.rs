@@ -43,9 +43,9 @@ pub fn inject_dll<P: AsRef<Path>>(target_pid: usize, payload_path: P, force: boo
     let target_process = OwnedProcess::from_pid(target_pid as u32)?;
     let syringe = Syringe::for_process(target_process);
     let _injected_payload = if force {
-        syringe.inject(payload_path)?;
+        syringe.inject(payload_path)?
     } else {
-        syringe.find_or_inject(payload_path)?;
+        syringe.find_or_inject(payload_path)?
     };
     Ok(())
 }
