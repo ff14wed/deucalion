@@ -20,5 +20,7 @@ jobs:
         toolchain: nightly
         override: true
         components: rustfmt, clippy
+    - name: Clippy
+      run: cargo clippy -- -Dwarnings
     - name: Run tests
       run: cargo test --verbose
