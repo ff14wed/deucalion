@@ -21,7 +21,7 @@ with other packet handling applications.
 
 Deucalion only supports 64-bit versions of FFXIV using DX11.
 
-Version 1.0.0 is compatible with Dawntrail (FFXIV 7.0+). Older FFXIV client versions should continue to use version 0.9.x.
+Version 1.0.0+ is compatible with Dawntrail (FFXIV 7.0+). Older FFXIV client versions should continue to use version 0.9.x.
 
 ## Features
 

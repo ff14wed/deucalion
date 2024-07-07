@@ -29,5 +29,5 @@ deucalion_client path/to/deucalion.dll -f
 **If Deucalion is still running, it may crash the game**
 
 ```bash
-deucalion_client deucalion-1.0.0.dll -e
+deucalion_client deucalion-1.1.0.dll -e
 ```
