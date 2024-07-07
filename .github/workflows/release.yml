@@ -35,6 +35,9 @@ jobs:
       run: |
         cargo build --release
 
+    - name: Build bcryptprimitives.rs shim
+      run: rustc shims/bcryptprimitives.rs -Copt-level=3 -Clto=fat --out-dir target/release
+
     - name: Code Sign
       uses: dlemstra/code-sign-action@v1
       with:
@@ -43,12 +46,26 @@ jobs:
         recursive: false
         files: |
           target/release/deucalion.dll
+          target/release/deucalion_client.exe
+          target/release/bcryptprimitives.dll
 
-    - name: SHA256Sum and GPG Sign
+    - name: Deucalion SHA256Sum and GPG Sign
       run: |
         sha256sum target/release/deucalion.dll > deucalion.sha256sum
         gpg --output deucalion.sha256sum.asc --clearsign deucalion.sha256sum
         cat deucalion.sha256sum.asc
+
+    - name: Deucalion Client SHA256Sum and GPG Sign
+      run: |
+        sha256sum target/release/deucalion_client.exe > deucalion_client.sha256sum
+        gpg --output deucalion_client.sha256sum.asc --clearsign deucalion_client.sha256sum
+        cat deucalion_client.sha256sum.asc
+
+    - name: Bcryptprimitives SHA256Sum and GPG Sign
+      run: |
+        sha256sum target/release/bcryptprimitives.dll > bcryptprimitives.sha256sum
+        gpg --output bcryptprimitives.sha256sum.asc --clearsign bcryptprimitives.sha256sum
+        cat bcryptprimitives.sha256sum.asc
 
     - name: Upload artifact
       uses: actions/upload-artifact@v3
@@ -56,8 +73,14 @@ jobs:
         name: deucalion
         path: |
           target/release/deucalion.dll
+          target/release/deucalion_client.exe
+          target/release/bcryptprimitives.dll
           deucalion.sha256sum
           deucalion.sha256sum.asc
+          deucalion_client.sha256sum
+          deucalion_client.sha256sum.asc
+          bcryptprimitives.sha256sum
+          bcryptprimitives.sha256sum.asc
 
   release:
     runs-on: ubuntu-latest
@@ -74,6 +97,12 @@ jobs:
         draft: true
         files: |
           deucalion/target/release/deucalion.dll
+          deucalion/target/release/deucalion_client.exe
+          deucalion/target/release/bcryptprimitives.dll
           deucalion/deucalion.sha256sum
           deucalion/deucalion.sha256sum.asc
+          deucalion/deucalion_client.sha256sum
+          deucalion/deucalion_client.sha256sum.asc
+          deucalion/bcryptprimitives.sha256sum
+          deucalion/bcryptprimitives.sha256sum.asc
 
