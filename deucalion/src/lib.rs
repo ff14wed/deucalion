@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use simplelog::{LevelFilter, WriteLogger};
+use w32module::drop_ref_count_to_one;
 #[cfg(windows)]
 use winapi::shared::minwindef::*;
 use winapi::um::libloaderapi;
@@ -24,6 +25,7 @@ use tokio::select;
 use tokio::sync::oneshot;
 
 mod hook;
+mod w32module;
 
 pub mod namedpipe;
 pub mod procloader;
@@ -152,10 +154,12 @@ async fn main_with_result() -> Result<()> {
     Ok(())
 }
 
+const DLL_PROCESS_ATTACH: u32 = 1;
+
 #[allow(non_snake_case)]
 #[no_mangle]
 unsafe extern "system" fn DllMain(hModule: HINSTANCE, reason: u32, _: u32) -> BOOL {
-    if reason == 1 {
+    if reason == DLL_PROCESS_ATTACH {
         processthreadsapi::CreateThread(
             0 as LPSECURITY_ATTRIBUTES,
             0,
@@ -219,6 +223,9 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
     if let Err(cause) = result {
         error!("Panic happened: {cause:?}");
         pause();
+    }
+    if let Err(e) = drop_ref_count_to_one(dll_base_addr as HMODULE) {
+        error!("Could not drop ref count to one: {e}")
     }
     info!("Shut down!");
     #[cfg(debug_assertions)]
