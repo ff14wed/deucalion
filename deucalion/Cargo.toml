@@ -60,6 +60,7 @@ winapi = { version = "0.3", features = [
   "libloaderapi",
   "consoleapi",
   "wincon",
+  "tlhelp32",
 ] }
 
 [dev-dependencies]
