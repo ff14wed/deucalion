@@ -8,7 +8,7 @@ license = "GPL-3.0"
 description = "High-performance Windows library for capturing decoded FFXIV packets."
 homepage = "https://github.com/ff14wed/deucalion"
 repository = "https://github.com/ff14wed/deucalion"
-readme = "README.md"
+readme = "../README.md"
 keywords = ["ffxiv", "windows", "dll-injection", "dll"]
 
 [package.metadata.winres]
