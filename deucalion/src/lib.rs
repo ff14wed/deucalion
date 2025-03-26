@@ -1,3 +1,6 @@
+#![feature(link_llvm_intrinsics)]
+#![allow(internal_features)]
+
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::panic;
@@ -43,6 +46,10 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const RECV_SIG: &str = "E8 $ { ' } 4C 8B 4F 10 8B 47 1C 45";
 const SEND_SIG: &str = "40 57 41 56 48 83 EC 38 48 8B F9 4C 8B F2";
 const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
+/// Overriding with a custom signature for create_target is not supported. If
+/// this has changed, it is likely that the hook is broken in a way that just
+/// a signature change won't fix.
+const CREATE_TARGET_SIG: &str = "E8 $ { ' } 41 83 C7 ? 41 81 FF";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     if payload.op == rpc::MessageOps::Recv || payload.op == rpc::MessageOps::Send {
@@ -86,11 +93,12 @@ fn initialize_hook_with_sig(hs: &Arc<hook::State>, sig: &str, hook_type: hook::H
 /// Automatically initialize all the hooks, but do not fatally exit if any
 /// fail to initialize.
 /// Returns initialization status for Recv, Send, SendLobby hook types
-fn auto_initialize_hooks(hs: &Arc<hook::State>) -> (bool, bool, bool) {
+fn auto_initialize_hooks(hs: &Arc<hook::State>) -> (bool, bool, bool, bool) {
     let r = initialize_hook_with_sig(hs, RECV_SIG, hook::HookType::Recv);
     let s = initialize_hook_with_sig(hs, SEND_SIG, hook::HookType::Send);
     let sl = initialize_hook_with_sig(hs, SEND_LOBBY_SIG, hook::HookType::SendLobby);
-    (r, s, sl)
+    let ct = initialize_hook_with_sig(hs, CREATE_TARGET_SIG, hook::HookType::CreateTarget);
+    (r, s, sl, ct)
 }
 
 #[tokio::main]
@@ -101,9 +109,9 @@ async fn main_with_result() -> Result<()> {
 
     info!("Attempting to auto-initialize the hooks");
 
-    let (r, s, sl) = auto_initialize_hooks(&hs);
+    let (r, s, sl, ct) = auto_initialize_hooks(&hs);
 
-    deucalion_server.set_hook_status(r, s, sl).await;
+    deucalion_server.set_hook_status(r, s, sl, ct).await;
     info!("Hooks initialized.");
 
     // Clone references to hook state and server state so that they can

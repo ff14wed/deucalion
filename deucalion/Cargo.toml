@@ -51,6 +51,7 @@ binary-layout = "3.2"
 dirs = "5.0"
 strum = "0.26"
 strum_macros = "0.26"
+crossbeam-channel = "0.5"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [

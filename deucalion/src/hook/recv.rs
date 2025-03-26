@@ -1,4 +1,10 @@
-use std::mem;
+use std::{
+    mem,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::Result;
 
@@ -10,9 +16,7 @@ use crate::rpc;
 
 use crate::procloader::get_ffxiv_handle;
 
-use super::packet;
-use super::waitgroup;
-use super::{Channel, HookError};
+use super::{packet, waitgroup, Channel, HookError};
 
 use log::error;
 
@@ -28,15 +32,28 @@ static_detour! {
 #[derive(Clone)]
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
+    deobf_queue_tx: crossbeam_channel::Sender<packet::Packet>,
+    create_target_hook_enabled: Arc<AtomicBool>,
     wg: waitgroup::WaitGroup,
 }
 
 impl Hook {
     pub fn new(
         data_tx: mpsc::UnboundedSender<rpc::Payload>,
+        deobf_queue_tx: crossbeam_channel::Sender<packet::Packet>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook> {
-        Ok(Hook { data_tx, wg })
+        Ok(Hook {
+            data_tx,
+            deobf_queue_tx,
+            create_target_hook_enabled: Arc::new(AtomicBool::new(false)),
+            wg,
+        })
+    }
+
+    pub fn set_create_target_hook_enabled(&self, enabled: bool) {
+        self.create_target_hook_enabled
+            .store(enabled, Ordering::SeqCst);
     }
 
     pub fn setup(&self, rvas: Vec<usize>) -> Result<()> {
@@ -94,22 +111,34 @@ impl Hook {
             return ret;
         }
 
-        match packet::extract_packets_from_frame(ptr_frame) {
+        let require_deobfuscation = if let Channel::Zone = channel {
+            self.create_target_hook_enabled.load(Ordering::SeqCst)
+        } else {
+            false
+        };
+
+        match packet::extract_packets_from_frame(ptr_frame, require_deobfuscation) {
             Ok(packets) => {
                 for packet in packets {
-                    let payload = match packet {
-                        packet::Packet::Ipc(data) => rpc::Payload {
-                            op: rpc::MessageOps::Recv,
-                            ctx: channel as u32,
-                            data,
-                        },
-                        packet::Packet::Other(data) => rpc::Payload {
-                            op: rpc::MessageOps::RecvOther,
-                            ctx: channel as u32,
-                            data,
-                        },
+                    match packet {
+                        packet::Packet::Ipc(data) => {
+                            let _ = self.data_tx.send(rpc::Payload {
+                                op: rpc::MessageOps::Recv,
+                                ctx: channel as u32,
+                                data,
+                            });
+                        }
+                        packet::Packet::ObfuscatedIpc { .. } => {
+                            let _ = self.deobf_queue_tx.send(packet);
+                        }
+                        packet::Packet::Other(data) => {
+                            let _ = self.data_tx.send(rpc::Payload {
+                                op: rpc::MessageOps::RecvOther,
+                                ctx: channel as u32,
+                                data,
+                            });
+                        }
                     };
-                    let _ = self.data_tx.send(payload);
                 }
             }
             Err(e) => {

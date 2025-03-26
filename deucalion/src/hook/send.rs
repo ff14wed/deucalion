@@ -72,7 +72,7 @@ impl Hook {
 
         let ptr_frame: *const u8 = *(a1.add(32) as *const usize) as *const u8;
 
-        match packet::extract_packets_from_frame(ptr_frame) {
+        match packet::extract_packets_from_frame(ptr_frame, false) {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
@@ -86,6 +86,7 @@ impl Hook {
                             ctx: channel as u32,
                             data,
                         },
+                        _ => panic!("We shouldn't ever need deobfuscation here."),
                     };
                     let _ = self.data_tx.send(payload);
                 }
