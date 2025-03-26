@@ -238,6 +238,7 @@ struct State {
     recv_hooked: bool,
     send_hooked: bool,
     send_lobby_hooked: bool,
+    create_target_hooked: bool,
 }
 
 impl State {
@@ -263,11 +264,12 @@ impl State {
 
     fn server_hello_string(&self) -> String {
         format!(
-            "SERVER HELLO. VERSION: {}. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+            "SERVER HELLO. VERSION: {}. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}. CREATE_TARGET {}.",
             crate::VERSION,
             Self::hook_status_string(self.recv_hooked),
             Self::hook_status_string(self.send_hooked),
             Self::hook_status_string(self.send_lobby_hooked),
+            Self::hook_status_string(self.create_target_hooked),
         )
     }
 }
@@ -287,17 +289,19 @@ impl Server {
                 recv_hooked: false,
                 send_hooked: false,
                 send_lobby_hooked: false,
+                create_target_hooked: false,
             })),
             shutdown_tx: OnceCell::new(),
         }
     }
 
     /// Notifies the server of the hook status.
-    pub async fn set_hook_status(&self, r: bool, s: bool, sl: bool) {
+    pub async fn set_hook_status(&self, r: bool, s: bool, sl: bool, ct: bool) {
         let mut state = self.state.lock().await;
         state.recv_hooked = r;
         state.send_hooked = s;
         state.send_lobby_hooked = sl;
+        state.create_target_hooked = ct;
     }
 
     pub async fn shutdown(&self) {
@@ -592,28 +596,25 @@ mod tests {
     async fn test_server_hello_message() {
         let server = Server::new();
 
-        let fmt_msg = |a, b, c| {
+        let fmt_msg = |a, b, c, d| {
             format!(
-                "SERVER HELLO. VERSION: {}. HOOK STATUS: RECV {}. SEND {}. SEND_LOBBY {}.",
+                "SERVER HELLO. VERSION: {}. HOOK STATUS: RECV {a}. SEND {b}. SEND_LOBBY {c}. CREATE_TARGET {d}.",
                 crate::VERSION,
-                a,
-                b,
-                c
             )
         };
         let combinations = vec![
-            (false, false, false, fmt_msg("OFF", "OFF", "OFF")),
-            (false, false, true, fmt_msg("OFF", "OFF", "ON")),
-            (false, true, false, fmt_msg("OFF", "ON", "OFF")),
-            (false, true, true, fmt_msg("OFF", "ON", "ON")),
-            (true, false, false, fmt_msg("ON", "OFF", "OFF")),
-            (true, false, true, fmt_msg("ON", "OFF", "ON")),
-            (true, true, false, fmt_msg("ON", "ON", "OFF")),
-            (true, true, true, fmt_msg("ON", "ON", "ON")),
+            (false, false, true, true, fmt_msg("OFF", "OFF", "ON", "ON")),
+            (false, true, false, true, fmt_msg("OFF", "ON", "OFF", "ON")),
+            (false, true, true, true, fmt_msg("OFF", "ON", "ON", "ON")),
+            (true, false, false, true, fmt_msg("ON", "OFF", "OFF", "ON")),
+            (true, false, true, true, fmt_msg("ON", "OFF", "ON", "ON")),
+            (true, true, false, true, fmt_msg("ON", "ON", "OFF", "ON")),
+            (true, true, true, true, fmt_msg("ON", "ON", "ON", "ON")),
+            (true, true, true, false, fmt_msg("ON", "ON", "ON", "OFF")),
         ];
 
-        for (r, s, sl, expected_hello) in combinations {
-            server.set_hook_status(r, s, sl).await;
+        for (r, s, sl, ct, expected_hello) in combinations {
+            server.set_hook_status(r, s, sl, ct).await;
 
             assert_eq!(
                 server.state.lock().await.server_hello_string(),
