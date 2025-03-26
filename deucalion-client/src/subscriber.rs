@@ -210,6 +210,10 @@ impl Subscriber {
         if hello_message.ctx != HELLO_CHANNEL {
             return Err(format_err!("First message wasn't a server hello?"));
         }
+        info!(
+            "Message from server: {}",
+            String::from_utf8_lossy(&hello_message.data)
+        );
 
         let (tx, rx) = mpsc::unbounded_channel();
 
