@@ -79,7 +79,7 @@ impl State {
         };
         info!("Scanning for {sig_name} sig: `{sig_str}`");
         let scan_start = Instant::now();
-        let rvas = find_pattern_matches(sig_name, sig, pe_image)
+        let rvas = find_pattern_matches(sig_name, sig, pe_image, true)
             .map_err(|e| format_err!("{}: {}", e, sig_str))?;
         info!("Sig scan took {:?}", scan_start.elapsed());
 

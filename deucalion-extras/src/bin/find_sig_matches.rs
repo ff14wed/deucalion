@@ -37,7 +37,7 @@ fn scan_sigs(image: &[u8], sig_str: &str) -> Result<Vec<usize>> {
     let pat = pattern::parse(sig_str).context(format!("Invalid signature: \"{sig_str}\""))?;
     let sig: &[pattern::Atom] = &pat;
 
-    let rvas = procloader::find_pattern_matches("", sig, file)
+    let rvas = procloader::find_pattern_matches("", sig, file, true)
         .map_err(|e| format_err!("{}: {}", e, sig_str))?;
 
     info!("Pattern search took {:?}", start.elapsed());

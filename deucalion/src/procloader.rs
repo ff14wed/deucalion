@@ -123,6 +123,7 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
     name: &'static str,
     pat: &[pat::Atom],
     pe: P,
+    find_deepest_match: bool,
 ) -> Result<Vec<usize>> {
     let mut addrs: Vec<usize> = Vec::new();
 
@@ -140,20 +141,20 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
             break;
         }
 
-        let mut deepest_match = 0;
-        for m in save {
-            if m > 0 {
-                deepest_match = m
+        let mut found_rva = save[0];
+        if find_deepest_match {
+            for m in save {
+                if m > 0 {
+                    found_rva = m;
+                }
             }
         }
 
-        if deepest_match == 0 {
+        if found_rva == 0 {
             return Err(SigScanError::InvalidMatch { name }.into());
         }
 
-        let rva: usize = deepest_match as usize;
-        addrs.push(rva);
-
+        addrs.push(found_rva as usize);
         start_rva = save[0] as usize + 1;
     }
 
