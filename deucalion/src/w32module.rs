@@ -54,7 +54,7 @@ unsafe fn get_ref_count(hmodule: HMODULE) -> Result<u32> {
     let mut more_modules: bool = true;
 
     while more_modules {
-        if hmodule == me32.hModule {
+        if std::ptr::eq(hmodule, me32.hModule) {
             if me32.GlblcntUsage == 0xFFFF {
                 continue;
             }
