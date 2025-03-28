@@ -218,7 +218,8 @@ impl Hook {
         let parent_ptr = self.parent_ptr.load(Ordering::SeqCst) as *const u8;
 
         if parent_ptr.offset_from(return_addr).abs() < 0x2000 {
-            if let Ok(expected_packet) = self.deobf_queue_rx.try_recv() {
+            let mut packet_sent = false;
+            while let Ok(expected_packet) = self.deobf_queue_rx.try_recv() {
                 match packet::reconstruct_deobfuscated_packet(
                     expected_packet,
                     source_actor as u32,
@@ -231,13 +232,19 @@ impl Hook {
                                 ctx: Channel::Zone as u32,
                                 data,
                             });
+                            packet_sent = true;
+                            break;
                         }
                     }
                     Err(e) => {
                         warn!("Failed to reconstruct deobfuscated packet: {e}");
                     }
                 }
-            } else {
+            }
+            if !packet_sent {
+                // If we went through the entire queue (or if it's empty)
+                // without sending a matching, corresponding packet, then
+                // give up.
                 let opcode: u16 = *(packet_data.byte_offset(2) as *const u16);
                 warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
             }
