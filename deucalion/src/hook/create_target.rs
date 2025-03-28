@@ -141,9 +141,16 @@ unsafe extern "C" {
     unsafe fn return_address(a: i32) -> *const u8;
 }
 
-unsafe extern "system" fn create_target(source_actor: usize) -> usize {
+unsafe extern "system" fn create_target(a1: usize) -> usize {
+    let source_actor: usize;
     let packet_data: *const u8;
-    asm!("mov {0}, rsi", out(reg) packet_data);
+    asm!("
+        # Ensure rsi is preserved before here
+        mov r14, {0}
+        mov {1}, rsi",
+        in(reg) a1,
+        out(reg) packet_data,
+        out("r14") source_actor);
 
     let return_addr = return_address(0);
 
