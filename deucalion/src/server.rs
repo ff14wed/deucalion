@@ -240,9 +240,8 @@ impl State {
         (id, rx)
     }
 
-    #[allow(clippy::needless_return)]
     fn hook_status_string(status: bool) -> &'static str {
-        return if status { "ON" } else { "OFF" };
+        if status { "ON" } else { "OFF" }
     }
 
     fn server_hello_string(&self) -> String {
@@ -446,9 +445,7 @@ impl Server {
         let (trigger, tripwire) = Tripwire::new();
 
         let endpoint = Endpoint::new(pipe_name);
-
         let incoming = endpoint.incoming()?.take_until(tripwire);
-
         futures::pin_mut!(incoming);
 
         tokio::spawn(async move {
