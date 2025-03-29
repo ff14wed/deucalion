@@ -105,39 +105,35 @@ impl Hook {
             return ret;
         }
 
-        let require_deobfuscation = if let Channel::Zone = channel {
+        let require_deobf = if let Channel::Zone = channel {
             self.create_target_hook_enabled.load(Ordering::SeqCst)
         } else {
             false
         };
 
-        match packet::extract_packets_from_frame(ptr_frame, require_deobfuscation) {
-            Ok(packets) => {
-                for packet in packets {
-                    match packet {
-                        packet::Packet::Ipc(data) => {
-                            let _ = self.data_tx.send(rpc::Payload {
-                                op: rpc::MessageOps::Recv,
-                                ctx: channel as u32,
-                                data,
-                            });
-                        }
-                        packet::Packet::ObfuscatedIpc { .. } => {
-                            let _ = self.deobf_queue_tx.send(packet);
-                        }
-                        packet::Packet::Other(data) => {
-                            let _ = self.data_tx.send(rpc::Payload {
-                                op: rpc::MessageOps::RecvOther,
-                                ctx: channel as u32,
-                                data,
-                            });
-                        }
-                    };
+        let res = packet::extract_packets_from_frame(ptr_frame, require_deobf).map(|packets| {
+            packets.into_iter().for_each(|packet| match packet {
+                packet::Packet::Ipc(data) => {
+                    let _ = self.data_tx.send(rpc::Payload {
+                        op: rpc::MessageOps::Recv,
+                        ctx: channel as u32,
+                        data,
+                    });
                 }
-            }
-            Err(e) => {
-                error!("Could not process packet: {e}")
-            }
+                packet::Packet::ObfuscatedIpc { .. } => {
+                    let _ = self.deobf_queue_tx.send(packet);
+                }
+                packet::Packet::Other(data) => {
+                    let _ = self.data_tx.send(rpc::Payload {
+                        op: rpc::MessageOps::RecvOther,
+                        ctx: channel as u32,
+                        data,
+                    });
+                }
+            });
+        });
+        if let Err(e) = res {
+            error!("Could not process packet: {e}");
         }
 
         ret

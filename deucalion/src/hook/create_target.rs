@@ -50,18 +50,14 @@ impl CustomDetour {
         D: Fn(usize, usize, usize) -> usize + Send + 'static,
     {
         let mut detour = Box::new(RawDetour::new(target, create_target as *const ())?);
-        if self
-            .detour
+        self.detour
             .compare_exchange(
                 std::ptr::null_mut(),
                 &mut *detour,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
             )
-            .is_err()
-        {
-            Err(HookError::AlreadyInitialized)?;
-        }
+            .map_err(|_| HookError::AlreadyInitialized)?;
 
         self.closure
             .store(Box::into_raw(Box::new(Box::new(closure))), Ordering::SeqCst);
@@ -217,23 +213,22 @@ impl Hook {
 
         if parent_ptr.offset_from(return_addr).abs() < 0x2000 {
             let mut packet_sent = false;
-            while let Ok(expected_packet) = self.deobf_queue_rx.try_recv() {
+            for expected_packet in self.deobf_queue_rx.try_iter() {
                 match packet::reconstruct_deobfuscated_packet(
                     expected_packet,
                     source_actor as u32,
                     packet_data,
                 ) {
-                    Ok(reconstructed_packet) => {
-                        if let packet::Packet::Ipc(data) = reconstructed_packet {
-                            let _ = self.data_tx.send(rpc::Payload {
-                                op: rpc::MessageOps::Recv,
-                                ctx: Channel::Zone as u32,
-                                data,
-                            });
-                            packet_sent = true;
-                            break;
-                        }
+                    Ok(packet::Packet::Ipc(data)) => {
+                        let _ = self.data_tx.send(rpc::Payload {
+                            op: rpc::MessageOps::Recv,
+                            ctx: Channel::Zone as u32,
+                            data,
+                        });
+                        packet_sent = true;
+                        break;
                     }
+                    Ok(_) => unreachable!("Reconstruct should only send Ipc packets"),
                     Err(e) => {
                         warn!("Failed to reconstruct deobfuscated packet: {e}");
                     }
