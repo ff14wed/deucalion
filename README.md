@@ -21,7 +21,14 @@ with other packet handling applications.
 
 Deucalion only supports 64-bit versions of FFXIV using DX11.
 
-Version 1.0.0+ is compatible with Dawntrail (FFXIV 7.0+). Older FFXIV client versions should continue to use version 0.9.x.
+The following is the compatibility matrix for Deucalion:
+
+| FFXIV Version | Deucalion Version |
+| ------------- | ----------------- |
+| 6.x           | 0.9.x             |
+| 7.0-7.1x      | 1.1.x             |
+| 7.2           | 1.2.x             |
+
 
 ## Features
 
@@ -248,7 +255,7 @@ to the subscriber.
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. VERSION: 1.1.0. HOOK STATUS: RECV ON. SEND ON. SEND_LOBBY ON." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. VERSION: 1.2.0. HOOK STATUS: RECV ON. SEND ON. SEND_LOBBY ON." }
 // Deucalion: Data streamed to all subscribers
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ...
@@ -257,7 +264,7 @@ Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 ### Example when Deucalion requires sigs
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. VERSION: 1.1.0. HOOK STATUS: RECV OFF. SEND OFF. SEND_LOBBY OFF." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. VERSION: 1.2.0. HOOK STATUS: RECV OFF. SEND OFF. SEND_LOBBY OFF. CREATE_TARGET OFF." }
 // Subscriber: Request with an invalid sig.
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: u8"invalid sig" }
 // Deucalion: Response with an invalid sig error.
@@ -277,7 +284,7 @@ If the Recv hook is already initialized, then the following scenario can happen:
 
 ```c
 // Deucalion: Connection established message.
-Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. VERSION: 1.1.0. RECV ON. SEND ON. SEND_LOBBY ON." }
+Payload { OP: OP.Debug, CHANNEL: 9000, DATA: u8"SERVER HELLO. VERSION: 1.2.0. RECV ON. SEND ON. SEND_LOBBY ON. CREATE_TARGET ON." }
 // Deucalion: Data streamed to all subscribers
 Payload { OP: OP.Recv, CHANNEL: 1, DATA: deucalion_segment }
 
