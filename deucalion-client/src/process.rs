@@ -13,6 +13,7 @@ use dll_syringe::{
     process::{OwnedProcess, Process},
     Syringe,
 };
+use sysinfo::ProcessesToUpdate;
 use winapi::{
     shared::winerror::ERROR_SUCCESS,
     um::{
@@ -30,11 +31,11 @@ use winapi::{
 
 pub fn find_all_pids_by_name(target_exe: &str) -> Vec<usize> {
     let mut system = sysinfo::System::new();
-    system.refresh_processes();
+    system.refresh_processes(ProcessesToUpdate::All, true);
     system
         .processes()
         .values()
-        .filter(move |process| process.name().contains(target_exe))
+        .filter(move |process| process.exe().is_some_and(|path| path.ends_with(target_exe)))
         .map(|process| process.pid().into())
         .collect()
 }
