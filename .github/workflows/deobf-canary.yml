@@ -1,0 +1,37 @@
+# Test to signal when changes to the rust compiler would impact the function
+# of the method used for deobfuscation
+name: Deobfuscation Canary
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-2019
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install latest nightly
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+        components: rustfmt, clippy
+    - name: Build
+      run: |
+        cd deucalion
+        cargo rustc --release -- --emit asm
+    - name: Test
+      shell: bash
+      run: |
+        if grep "# Ensure rsi" "target/release/deps/deucalion.s" -B 20 \
+         | grep ".seh_endprologue" -A 10 \
+         | grep -q "movq.*, %rsi$"; then
+          echo "Something found using rsi as a destination register" >> /dev/stderr
+          exit 1
+        fi
