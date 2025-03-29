@@ -52,8 +52,9 @@ impl Drop for WaitGroupGuard {
     }
 }
 
-use parking_lot::{Condvar, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use parking_lot::{Condvar, Mutex};
 
 struct RawWaitGroup {
     active: AtomicUsize,

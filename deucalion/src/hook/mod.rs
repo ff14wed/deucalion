@@ -1,18 +1,16 @@
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
-use anyhow::{format_err, Context, Result};
-use thiserror::Error;
-
-use tokio::sync::{mpsc, Mutex};
-
-use pelite::{pattern, pe::PeView, ImageMap};
-
+use anyhow::{Context, Result, format_err};
 use log::info;
+use pelite::{ImageMap, pattern, pe::PeView};
 use strum_macros::Display;
+use thiserror::Error;
+use tokio::sync::{Mutex, mpsc};
 
-use crate::procloader::{find_pattern_matches, get_ffxiv_filepath};
-use crate::rpc;
+use crate::{
+    procloader::{find_pattern_matches, get_ffxiv_filepath},
+    rpc,
+};
 
 mod create_target;
 mod packet;

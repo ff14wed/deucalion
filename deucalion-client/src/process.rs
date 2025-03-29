@@ -6,13 +6,12 @@ use std::{
     ptr,
 };
 
-use anyhow::{format_err, Result};
-use log::debug;
-
+use anyhow::{Result, format_err};
 use dll_syringe::{
-    process::{OwnedProcess, Process},
     Syringe,
+    process::{OwnedProcess, Process},
 };
+use log::debug;
 use sysinfo::ProcessesToUpdate;
 use winapi::{
     shared::winerror::ERROR_SUCCESS,

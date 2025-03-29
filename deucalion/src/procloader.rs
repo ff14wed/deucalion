@@ -1,22 +1,20 @@
-use std::{mem, ptr};
-
-use winapi::shared::minwindef;
-use winapi::shared::minwindef::MAX_PATH;
-use winapi::um::libloaderapi;
-
-use std::ffi::OsString;
-use std::os::windows::prelude::OsStringExt;
+use std::{ffi::OsString, mem, os::windows::prelude::OsStringExt, ptr};
 
 use anyhow::{Context, Result};
-use thiserror::Error;
-
-use pelite::pattern as pat;
-use pelite::pe::image::{Rva, Va};
-use pelite::pe::Pe;
-
-use memchr::memmem;
-
 use log::{debug, info};
+use memchr::memmem;
+use pelite::{
+    pattern as pat,
+    pe::{
+        Pe,
+        image::{Rva, Va},
+    },
+};
+use thiserror::Error;
+use winapi::{
+    shared::{minwindef, minwindef::MAX_PATH},
+    um::libloaderapi,
+};
 
 #[derive(Debug, Error)]
 enum ProcLoaderError {

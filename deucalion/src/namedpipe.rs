@@ -29,17 +29,20 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
-use winapi::shared::winerror::ERROR_PIPE_BUSY;
+use std::{
+    io,
+    path::Path,
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use futures::Stream;
-use std::io;
-use std::path::Path;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
-use tokio::io::{AsyncRead, AsyncWrite};
-
-use tokio::net::windows::named_pipe;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::windows::named_pipe,
+};
+use winapi::shared::winerror::ERROR_PIPE_BUSY;
 
 enum NamedPipe {
     Server(named_pipe::NamedPipeServer),

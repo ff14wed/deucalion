@@ -4,18 +4,16 @@
 
 use std::{fs, io::Read, path::PathBuf, sync::Arc, time::SystemTime};
 
-use anyhow::{format_err, Context, Result};
+use anyhow::{Context, Result, format_err};
 use simplelog::{LevelFilter, WriteLogger};
 use w32module::drop_ref_count_to_one;
-
+#[cfg(debug_assertions)]
+use winapi::um::{consoleapi, wincon};
 #[cfg(windows)]
 use winapi::{
     shared::minwindef::*,
     um::{libloaderapi, minwinbase::*, processthreadsapi},
 };
-
-#[cfg(debug_assertions)]
-use winapi::um::{consoleapi, wincon};
 
 mod hook;
 mod w32module;
@@ -27,7 +25,6 @@ pub mod rpc;
 mod server;
 
 use log::{error, info};
-
 #[cfg(debug_assertions)]
 use simplelog::{CombinedLogger, SimpleLogger};
 

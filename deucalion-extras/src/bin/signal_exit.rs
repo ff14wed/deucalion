@@ -1,7 +1,7 @@
-use deucalion::namedpipe::Endpoint;
-use deucalion::rpc;
-use futures::{SinkExt, StreamExt};
 use std::env;
+
+use deucalion::{namedpipe::Endpoint, rpc};
+use futures::{SinkExt, StreamExt};
 use tokio_util::codec::Framed;
 
 #[tokio::main]

@@ -1,7 +1,7 @@
 use core::slice;
 use std::mem;
 
-use anyhow::{format_err, Result};
+use anyhow::{Result, format_err};
 use binary_layout::prelude::*;
 
 binary_layout!(frame_header, LittleEndian, {

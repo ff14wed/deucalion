@@ -5,20 +5,18 @@ use std::{
     arch::asm,
     mem,
     sync::{
+        Arc, LazyLock,
         atomic::{AtomicPtr, AtomicUsize, Ordering},
-        Arc,
     },
 };
 
-use anyhow::{format_err, Result};
+use anyhow::{Result, format_err};
 use log::{error, warn};
 use retour::RawDetour;
 use tokio::sync::mpsc;
 
-use super::{packet, waitgroup, Channel, HookError};
+use super::{Channel, HookError, packet, waitgroup};
 use crate::{procloader::get_ffxiv_handle, rpc};
-
-use std::sync::LazyLock;
 
 // Once initialized, it's important to keep this in memory so that any
 // stray calls to the hook still have a valid trampoline to call.

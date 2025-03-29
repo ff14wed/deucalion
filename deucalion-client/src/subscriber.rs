@@ -1,23 +1,23 @@
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
-use anyhow::{format_err, Result};
-
+use anyhow::{Result, format_err};
+use deucalion::{
+    namedpipe::Endpoint,
+    rpc::{MessageOps, Payload, PayloadCodec},
+};
 use futures::{SinkExt, Stream, StreamExt};
-
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
-use tokio::sync::OnceCell;
-use tokio_util::codec::Framed;
-
 use log::{error, info};
-
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
-
-use deucalion::namedpipe::Endpoint;
-use deucalion::rpc::{MessageOps, Payload, PayloadCodec};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::{OnceCell, mpsc},
+};
+use tokio_retry::{Retry, strategy::ExponentialBackoff};
+use tokio_util::codec::Framed;
 
 /// Shorthand for the receive half of the message channel.
 type Rx = mpsc::UnboundedReceiver<Payload>;

@@ -1,26 +1,27 @@
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
-use anyhow::{format_err, Error, Result};
-
+use anyhow::{Error, Result, format_err};
 use futures::{SinkExt, Stream, StreamExt};
-
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinSet;
-use tokio::time::{self, Duration};
+use log::{error, info};
+use once_cell::sync::OnceCell;
+use stream_cancel::Tripwire;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::{Mutex, mpsc},
+    task::JoinSet,
+    time::{self, Duration},
+};
 use tokio_util::codec::Framed;
 
-use once_cell::sync::OnceCell;
-
-use stream_cancel::Tripwire;
-
-use log::{error, info};
-
-use crate::namedpipe::Endpoint;
-use crate::rpc::{MessageOps, Payload, PayloadCodec};
+use crate::{
+    namedpipe::Endpoint,
+    rpc::{MessageOps, Payload, PayloadCodec},
+};
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<Payload>;
@@ -513,10 +514,11 @@ impl Server {
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use super::*;
     use ntest::{assert_false, assert_true, timeout};
     use rand::Rng;
     use tokio::{select, task::JoinHandle};
+
+    use super::*;
 
     #[test]
     fn test_individual_packet_filters() {

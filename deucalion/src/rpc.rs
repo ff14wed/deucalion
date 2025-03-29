@@ -1,5 +1,6 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
+
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 #[repr(u8)]
@@ -212,12 +213,12 @@ mod tests {
                 Payload {
                     op: MessageOps::Debug,
                     ctx: 100,
-                    data: vec![4, 5, 6, 7, 8, 9],
+                    data: vec![4, 5, 6, 7, 8, 9]
                 },
                 Payload {
                     op: MessageOps::Ping,
                     ctx: 101,
-                    data: vec![4, 5, 6, 7, 8, 9, 10],
+                    data: vec![4, 5, 6, 7, 8, 9, 10]
                 },
             ]
         );

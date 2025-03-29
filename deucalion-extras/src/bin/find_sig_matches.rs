@@ -1,11 +1,9 @@
-use deucalion::procloader;
-use pelite::pe64::PeView;
-use pelite::{pattern, ImageMap};
 use std::{env, time::Instant};
 
-use anyhow::{format_err, Context, Result};
-
+use anyhow::{Context, Result, format_err};
+use deucalion::procloader;
 use log::info;
+use pelite::{ImageMap, pattern, pe64::PeView};
 use simplelog::{LevelFilter, SimpleLogger};
 
 fn main() {

@@ -1,5 +1,5 @@
-use anyhow::{format_err, Result};
-
+use anyhow::{Result, format_err};
+use log::info;
 use winapi::{
     shared::{minwindef::HMODULE, ntdef::HANDLE},
     um::{
@@ -8,12 +8,10 @@ use winapi::{
         libloaderapi::FreeLibrary,
         processthreadsapi::GetCurrentProcessId,
         tlhelp32::{
-            CreateToolhelp32Snapshot, Module32First, Module32Next, MODULEENTRY32, TH32CS_SNAPMODULE,
+            CreateToolhelp32Snapshot, MODULEENTRY32, Module32First, Module32Next, TH32CS_SNAPMODULE,
         },
     },
 };
-
-use log::info;
 
 struct TH32Handle(HANDLE);
 

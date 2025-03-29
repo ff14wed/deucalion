@@ -1,20 +1,12 @@
 use std::mem;
 
 use anyhow::Result;
-
+use log::error;
+use retour::{StaticDetour, static_detour};
 use tokio::sync::mpsc;
 
-use retour::{static_detour, StaticDetour};
-
-use crate::rpc;
-
-use crate::procloader::get_ffxiv_handle;
-
-use super::packet;
-use super::waitgroup;
-use super::{Channel, HookError};
-
-use log::error;
+use super::{Channel, HookError, packet, waitgroup};
+use crate::{procloader::get_ffxiv_handle, rpc};
 
 type HookedFunction = unsafe extern "system" fn(*const u8, usize) -> usize;
 type StaticHook = StaticDetour<HookedFunction>;
@@ -66,7 +58,6 @@ impl Hook {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     unsafe fn compress_packet(&self, channel: Channel, a1: *const u8, a2: usize) -> usize {
         let _guard = self.wg.add();
 
