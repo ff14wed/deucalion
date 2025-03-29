@@ -113,9 +113,7 @@ impl Default for Subscriber {
 
 impl Subscriber {
     pub fn new() -> Self {
-        Self {
-            shutdown_tx: Arc::new(OnceCell::new()),
-        }
+        Self { shutdown_tx: Arc::new(OnceCell::new()) }
     }
 
     pub async fn shutdown(&self) {
@@ -223,11 +221,7 @@ impl Subscriber {
             HELLO_CHANNEL,
             "DEUCALION_CLIENT".as_bytes().into(),
         ))?;
-        tx.send(Payload {
-            op: MessageOps::Option,
-            ctx: filter,
-            data: Vec::new(),
-        })?;
+        tx.send(Payload { op: MessageOps::Option, ctx: filter, data: vec![] })?;
 
         let self_clone = self.clone();
         let msg_loop_task = tokio::spawn(async move {

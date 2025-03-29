@@ -35,11 +35,7 @@ async fn signal_pipe(pipe_name: &str) {
 
     // Send exit
     frames
-        .send(rpc::Payload {
-            op: rpc::MessageOps::Exit,
-            ctx: 0,
-            data: Vec::new(),
-        })
+        .send(rpc::Payload { op: rpc::MessageOps::Exit, ctx: 0, data: vec![] })
         .await
         .unwrap();
 }

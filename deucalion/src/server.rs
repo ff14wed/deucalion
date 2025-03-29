@@ -93,11 +93,7 @@ fn dbg_payload(ctx: u32, data: Vec<u8>) -> Payload {
 }
 
 fn ping_payload() -> Payload {
-    Payload {
-        op: MessageOps::Ping,
-        ctx: 0,
-        data: Vec::new(),
-    }
+    Payload { op: MessageOps::Ping, ctx: 0, data: vec![] }
 }
 
 /// Checks to make sure that the UTF-8 string is 30 characters or less and is
@@ -469,11 +465,7 @@ impl Server {
                 loop {
                     interval.tick().await;
                     self_clone
-                        .broadcast(Payload {
-                            op: MessageOps::Ping,
-                            ctx: 0,
-                            data: Vec::new(),
-                        })
+                        .broadcast(Payload { op: MessageOps::Ping, ctx: 0, data: vec![] })
                         .await;
                 }
             }
@@ -664,11 +656,7 @@ mod tests {
 
             // Send option
             frames
-                .send(Payload {
-                    op: MessageOps::Option,
-                    ctx: filter,
-                    data: Vec::new(),
-                })
+                .send(Payload { op: MessageOps::Option, ctx: filter, data: vec![] })
                 .await
                 .unwrap();
 
@@ -694,13 +682,7 @@ mod tests {
             ];
 
             for (op, ctx, should_be_allowed) in configurations {
-                server
-                    .broadcast(Payload {
-                        op,
-                        ctx,
-                        data: Vec::new(),
-                    })
-                    .await;
+                server.broadcast(Payload { op, ctx, data: vec![] }).await;
 
                 select! {
                     data = frames.next() => {
@@ -807,11 +789,7 @@ mod tests {
 
         // Send exit
         frames
-            .send(Payload {
-                op: MessageOps::Exit,
-                ctx: 0,
-                data: Vec::new(),
-            })
+            .send(Payload { op: MessageOps::Exit, ctx: 0, data: vec![] })
             .await
             .unwrap();
 
@@ -1008,7 +986,7 @@ mod tests {
 
         // Send two packets
         for i in 0..2 {
-            server.broadcast(dbg_payload(i, Vec::new())).await;
+            server.broadcast(dbg_payload(i, vec![])).await;
         }
 
         // Give some time for the subscriber to process the messages

@@ -99,7 +99,7 @@ pub(super) unsafe fn extract_packets_from_frame(
 
     let mut frame_data_offset: usize = 0;
 
-    let mut packets: Vec<Packet> = Vec::new();
+    let mut packets = Vec::<Packet>::new();
     for _ in 0..num_segments {
         let segment_size = segment_header::size::read(&frame_data[frame_data_offset..]);
         let segment_header_size = segment_header::SIZE.unwrap();
@@ -163,12 +163,7 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
     source_actor: u32,
     data: *const u8,
 ) -> Result<Packet> {
-    if let Packet::ObfuscatedIpc {
-        deucalion_segment_header,
-        opcode,
-        data_len,
-    } = expected_packet
-    {
+    if let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = expected_packet {
         let header = deucalion_segment_header::View::new(&deucalion_segment_header);
         let expected_source_actor = header.source_actor().read();
         if source_actor != expected_source_actor {
@@ -256,12 +251,7 @@ mod tests {
         let packets =
             unsafe { extract_packets_from_frame(DUMMY_FRAME_DATA.as_ptr(), true).unwrap() };
         assert_eq!(packets.len(), 1);
-        if let Packet::ObfuscatedIpc {
-            deucalion_segment_header,
-            opcode,
-            data_len,
-        } = &packets[0]
-        {
+        if let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = &packets[0] {
             let header = deucalion_segment_header::View::new(deucalion_segment_header);
             assert_eq!(header.source_actor().read(), 0x04030201);
             assert_eq!(header.target_actor().read(), 0x08070605);

@@ -124,10 +124,7 @@ impl Endpoint {
 
     /// New IPC endpoint at the given path
     pub fn new(path: String) -> Self {
-        Endpoint {
-            path,
-            created_listener: false,
-        }
+        Endpoint { path, created_listener: false }
     }
 }
 

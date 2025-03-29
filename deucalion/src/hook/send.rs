@@ -34,7 +34,7 @@ impl Hook {
         if rvas.len() != 2 {
             return Err(HookError::SignatureMatchFailed(rvas.len(), 2).into());
         }
-        let mut ptrs: Vec<*const u8> = Vec::new();
+        let mut ptrs = Vec::<*const u8>::new();
         for rva in rvas {
             ptrs.push(get_ffxiv_handle()?.wrapping_add(rva));
         }
@@ -67,11 +67,9 @@ impl Hook {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
-                        packet::Packet::Ipc(data) => rpc::Payload {
-                            op: rpc::MessageOps::Send,
-                            ctx: channel as u32,
-                            data,
-                        },
+                        packet::Packet::Ipc(data) => {
+                            rpc::Payload { op: rpc::MessageOps::Send, ctx: channel as u32, data }
+                        }
                         packet::Packet::Other(data) => rpc::Payload {
                             op: rpc::MessageOps::SendOther,
                             ctx: channel as u32,

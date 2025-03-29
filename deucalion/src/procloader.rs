@@ -123,7 +123,7 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
     pe: P,
     find_deepest_match: bool,
 ) -> Result<Vec<usize>> {
-    let mut addrs: Vec<usize> = Vec::new();
+    let mut addrs = Vec::<usize>::new();
 
     let mut start_rva: usize = 0;
 
@@ -168,7 +168,7 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
 /// subset of the pattern syntax is supported.
 fn get_pat_len_and_excerpt(pat: &[pat::Atom]) -> Result<(usize, Vec<u8>, usize)> {
     let mut idx = 0;
-    let mut excerpt: Vec<u8> = Vec::new();
+    let mut excerpt = Vec::<u8>::new();
 
     let mut pat_len: usize = 0;
     let mut offset: usize = 0;

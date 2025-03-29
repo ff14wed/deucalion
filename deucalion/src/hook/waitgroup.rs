@@ -11,9 +11,7 @@ impl WaitGroup {
     /// The semaphore will limit the number of processes that can access
     /// the underlying resource at every point in time to the specified capacity.
     pub fn new() -> Self {
-        WaitGroup {
-            raw: Arc::new(RawWaitGroup::new()),
-        }
+        WaitGroup { raw: Arc::new(RawWaitGroup::new()) }
     }
 
     #[inline]
