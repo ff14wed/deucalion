@@ -628,7 +628,7 @@ mod tests {
     async fn run_server() -> (Server, String, JoinHandle<()>) {
         let server = Server::new();
 
-        let test_id: u16 = rand::thread_rng().gen();
+        let test_id: u16 = rand::rng().random();
         let pipe_name = format!(r"\\.\pipe\deucalion-test-{}", test_id);
 
         let server_clone = server.clone();
@@ -906,8 +906,7 @@ mod tests {
         // Send two packets
         for i in 0..2 {
             let mut dummy_data = Vec::from([0u8; 5000]);
-            rand::thread_rng().fill(&mut dummy_data[..]);
-
+            rand::rng().fill(&mut dummy_data[..]);
             server.broadcast(dbg_payload(i, dummy_data)).await;
         }
 
@@ -952,8 +951,7 @@ mod tests {
             const NUM_PACKETS: u32 = 10000;
             for i in 0..NUM_PACKETS {
                 let mut dummy_data = Vec::from([0u8; 5000]);
-                rand::thread_rng().fill(&mut dummy_data[..]);
-
+                rand::rng().fill(&mut dummy_data[..]);
                 server.broadcast(dbg_payload(i, dummy_data)).await;
             }
 
