@@ -25,7 +25,7 @@ name = "deucalion"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-tokio = { version = "1.38.0", features = [
+tokio = { version = "1.44.1", features = [
   "io-util",
   "sync",
   "rt",
@@ -34,7 +34,7 @@ tokio = { version = "1.38.0", features = [
   "time",
   "macros",
 ] }
-tokio-util = { version = "0.7.11", features = ["codec", "compat"] }
+tokio-util = { version = "0.7.14", features = ["codec", "compat"] }
 futures = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -46,8 +46,8 @@ retour = { version = "0.4.0-alpha.3", features = ["static-detour"] }
 parking_lot = "0.12"
 pelite = "0.10"
 memchr = "2"
-once_cell = "1.19"
-binary-layout = "3.2"
+once_cell = "1.21"
+binary-layout = "4.0"
 dirs = "5.0"
 strum = "0.26"
 strum_macros = "0.26"
