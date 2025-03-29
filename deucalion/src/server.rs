@@ -24,7 +24,6 @@ use crate::rpc::{MessageOps, Payload, PayloadCodec};
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<Payload>;
-
 /// Shorthand for the receive half of the message channel.
 type Rx = mpsc::UnboundedReceiver<Payload>;
 
@@ -32,7 +31,6 @@ type Rx = mpsc::UnboundedReceiver<Payload>;
 enum Message {
     /// A message that was sent from a subscriber to the server
     Request(Payload),
-
     /// A message that should be sent to subscribers
     Data(Payload),
 }
@@ -49,7 +47,6 @@ where
     /// we can work at the Payload level instead of having to manage the
     /// raw byte operations.
     frames: Framed<T, PayloadCodec>,
-
     /// Receive half of the message channel.
     ///
     /// This is used to receive messages from broadcasts.
@@ -79,10 +76,8 @@ where
         Poll::Ready(match result {
             // We've received a request
             Some(Ok(message)) => Some(Ok(Message::Request(message))),
-
             // An error occured.
             Some(Err(e)) => Some(Err(e.into())),
-
             // The stream has been exhausted.
             None => None,
         })
@@ -172,25 +167,16 @@ where
         F: Fn(Payload) -> Result<()>,
     {
         let ctx = payload.ctx;
-
-        let ack_prefix = {
-            match payload.op {
-                MessageOps::Recv => "RECV ",
-                MessageOps::Send => "SEND ",
-                _ => "",
-            }
+        let ack_prefix = match payload.op {
+            MessageOps::Recv => "RECV ",
+            MessageOps::Send => "SEND ",
+            _ => "",
         };
-
-        match payload_handler(payload) {
-            Ok(()) => {
-                self.send_dbg_payload(ctx, format!("{ack_prefix}OK").into())
-                    .await?
-            }
-            Err(e) => {
-                self.send_dbg_payload(ctx, format!("{ack_prefix}{e}").into())
-                    .await?
-            }
-        }
+        let debug_payload = match payload_handler(payload) {
+            Ok(()) => format!("{ack_prefix}OK"),
+            Err(e) => format!("{ack_prefix}{e}"),
+        };
+        self.send_dbg_payload(ctx, debug_payload.into()).await?;
         Ok(())
     }
 }
@@ -651,11 +637,8 @@ mod tests {
     {
         // Handle the SERVER_HELLO message
         let message = frames.next().await.unwrap();
-        if let Ok(payload) = message {
-            assert_eq!(payload.ctx, HELLO_CHANNEL);
-        } else {
-            panic!("Did not properly receive Server Hello");
-        }
+        let payload = message.expect("Server Hello should be properly received");
+        assert_eq!(payload.ctx, HELLO_CHANNEL);
     }
 
     #[tokio::test(flavor = "multi_thread")]

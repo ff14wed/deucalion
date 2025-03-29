@@ -86,7 +86,7 @@ impl Hook {
                             ctx: channel as u32,
                             data,
                         },
-                        _ => panic!("We shouldn't ever need deobfuscation here."),
+                        _ => unreachable!("This should never send obfuscated packets"),
                     };
                     let _ = self.data_tx.send(payload);
                 }
@@ -98,7 +98,7 @@ impl Hook {
 
         let hook = match channel {
             Channel::Chat => &CompressPacketChat,
-            Channel::Lobby => panic!("Not implemented."),
+            Channel::Lobby => unreachable!("This hook is not implemented for lobby"),
             Channel::Zone => &CompressPacketZone,
         };
         hook.call(a1, a2)

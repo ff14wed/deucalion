@@ -77,7 +77,7 @@ impl Hook {
                             ctx: Channel::Lobby as u32,
                             data,
                         },
-                        _ => panic!("We shouldn't ever need deobfuscation here."),
+                        _ => unreachable!("This should never send obfuscated packets"),
                     };
                     let _ = self.data_tx.send(payload);
                 }

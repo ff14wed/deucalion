@@ -1,31 +1,21 @@
 #![feature(link_llvm_intrinsics)]
 #![allow(internal_features)]
+#![deny(unused_imports)]
 
-use std::fs::{self, File};
-use std::io::{self, Read};
-use std::panic;
-use std::path::PathBuf;
-use std::time::SystemTime;
-
-use simplelog::{LevelFilter, WriteLogger};
-use w32module::drop_ref_count_to_one;
-#[cfg(windows)]
-use winapi::shared::minwindef::*;
-use winapi::um::libloaderapi;
-use winapi::um::minwinbase::*;
-use winapi::um::processthreadsapi;
-
-#[cfg(debug_assertions)]
-use winapi::um::consoleapi;
-#[cfg(debug_assertions)]
-use winapi::um::wincon;
-
-use std::sync::Arc;
+use std::{fs, io::Read, path::PathBuf, sync::Arc, time::SystemTime};
 
 use anyhow::{format_err, Context, Result};
+use simplelog::{LevelFilter, WriteLogger};
+use w32module::drop_ref_count_to_one;
 
-use tokio::select;
-use tokio::sync::oneshot;
+#[cfg(windows)]
+use winapi::{
+    shared::minwindef::*,
+    um::{libloaderapi, minwinbase::*, processthreadsapi},
+};
+
+#[cfg(debug_assertions)]
+use winapi::um::{consoleapi, wincon};
 
 mod hook;
 mod w32module;
@@ -52,44 +42,28 @@ const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
 const CREATE_TARGET_SIG: &str = "E8 $ { ' } 41 83 C7 ? 41 81 FF";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
-    if payload.op == rpc::MessageOps::Recv || payload.op == rpc::MessageOps::Send {
-        let hook_type = match payload.op {
-            rpc::MessageOps::Recv => hook::HookType::Recv,
-            rpc::MessageOps::Send => {
-                if payload.ctx == 0 {
-                    hook::HookType::SendLobby
-                } else {
-                    hook::HookType::Send
-                }
-            }
-            _ => panic!("This case shouldn't be possible"),
-        };
-        if let Err(e) = parse_sig_and_initialize_hook(hs, payload.data, hook_type) {
-            let err = format_err!("error initializing hook: {e}");
-            error!("{err}");
-            return Err(err);
-        }
-    }
-    Ok(())
+    let hook_type = match payload.op {
+        rpc::MessageOps::Recv => hook::HookType::Recv,
+        rpc::MessageOps::Send if payload.ctx == 0 => hook::HookType::SendLobby,
+        rpc::MessageOps::Send => hook::HookType::Send,
+        _ => return Ok(()),
+    };
+
+    let sig_str = String::from_utf8(payload.data).context("Invalid string")?;
+    hs.initialize_hook(sig_str, hook_type).map_err(|e| {
+        // Errors will be returned to the sender, so we should do the logging here.
+        error!("Hook initialization error: {e}");
+        format_err!("error initializing hook: {e}")
+    })
 }
 
-fn parse_sig_and_initialize_hook(
-    hs: Arc<hook::State>,
-    data: Vec<u8>,
-    hook_type: hook::HookType,
-) -> Result<()> {
-    let sig_str = String::from_utf8(data).context("Invalid string")?;
-    hs.initialize_hook(sig_str, hook_type)
-}
-
+#[rustfmt::skip]
 fn initialize_hook_with_sig(hs: &Arc<hook::State>, sig: &str, hook_type: hook::HookType) -> bool {
-    if let Err(e) = hs.initialize_hook(sig.into(), hook_type) {
+    hs.initialize_hook(sig.into(), hook_type).map_err(|e| {
         error!("Could not auto-initialize the {hook_type} hook: {e}");
-        false
-    } else {
-        true
-    }
+    }).is_ok()
 }
+
 /// Automatically initialize all the hooks, but do not fatally exit if any
 /// fail to initialize.
 /// Returns initialization status for Recv, Send, SendLobby hook types
@@ -106,11 +80,8 @@ async fn main_with_result() -> Result<()> {
     info!("Starting Deucalion v{VERSION}");
     let hs = Arc::new(hook::State::new().context("error setting up the hook")?);
     let deucalion_server = server::Server::new();
-
     info!("Attempting to auto-initialize the hooks");
-
     let (r, s, sl, ct) = auto_initialize_hooks(&hs);
-
     deucalion_server.set_hook_status(r, s, sl, ct).await;
     info!("Hooks initialized.");
 
@@ -119,17 +90,15 @@ async fn main_with_result() -> Result<()> {
     let hs_clone = hs.clone();
     let deucalion_server_clone = deucalion_server.clone();
 
-    let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Message loop that forwards messages from the hooks to the server task
     let msg_loop_handle = tokio::spawn(async move {
+        let mut broadcast_rx = hs_clone.broadcast_rx.lock().await;
         loop {
-            let mut broadcast_rx = hs_clone.broadcast_rx.lock().await;
-            select! {
-                res = broadcast_rx.recv() => {
-                    if let Some(payload) = res {
-                        deucalion_server_clone.broadcast(payload).await;
-                    }
+            tokio::select! {
+                Some(payload) = broadcast_rx.recv() => {
+                    deucalion_server_clone.broadcast(payload).await;
                 },
                 _ = &mut shutdown_rx => {
                     hs_clone.shutdown();
@@ -182,7 +151,7 @@ unsafe extern "system" fn DllMain(hModule: HINSTANCE, reason: u32, _: u32) -> BO
 
 fn pause() {
     println!("Press enter to exit...");
-    let _ = io::stdin().read(&mut [0u8]).unwrap();
+    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }
 
 fn logging_setup() -> Result<()> {
@@ -197,7 +166,7 @@ fn logging_setup() -> Result<()> {
 
     log_path.push(format!("session-{secs_since_epoch}.log"));
 
-    let log_file = File::create(log_path.as_path())?;
+    let log_file = fs::File::create(log_path.as_path())?;
 
     #[cfg(debug_assertions)]
     {
@@ -222,7 +191,7 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
         println!("Error initializing logger: {e}");
     }
 
-    let result = panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(|| {
         if let Err(e) = main_with_result() {
             error!("Encountered fatal error: {e}");
             pause();
