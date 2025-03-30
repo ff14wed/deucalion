@@ -155,9 +155,7 @@ fn pause() {
 }
 
 fn logging_setup() -> Result<()> {
-    let secs_since_epoch = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs();
+    let secs_since_epoch = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
 
     let mut log_path = PathBuf::new();
     log_path.push(dirs::data_dir().context("Data dir not found")?);

@@ -101,11 +101,7 @@ impl Endpoint {
         // so we keep trying or sleeping for a bit, until we hit a timeout
         let attempt_start = Instant::now();
         let client = loop {
-            match named_pipe::ClientOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)
-            {
+            match named_pipe::ClientOptions::new().read(true).write(true).open(path) {
                 Ok(client) => break client,
                 Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => {
                     if attempt_start.elapsed() < PIPE_AVAILABILITY_TIMEOUT {

@@ -189,9 +189,7 @@ impl Subscriber {
             .map_err(|_| format_err!("cannot run subscriber more than once"))?;
 
         let subscriber = Retry::spawn(
-            ExponentialBackoff::from_millis(10)
-                .max_delay(Duration::from_secs(1))
-                .take(8),
+            ExponentialBackoff::from_millis(10).max_delay(Duration::from_secs(1)).take(8),
             || Endpoint::connect(pipe_name),
         )
         .await?;
@@ -201,10 +199,7 @@ impl Subscriber {
         let mut frames = Framed::new(subscriber, codec);
 
         // Handle the SERVER_HELLO message
-        let hello_message = frames
-            .next()
-            .await
-            .ok_or(format_err!("Couldn't get next frame"))??;
+        let hello_message = frames.next().await.ok_or(format_err!("Couldn't get next frame"))??;
         if hello_message.ctx != HELLO_CHANNEL {
             return Err(format_err!("First message wasn't a server hello?"));
         }

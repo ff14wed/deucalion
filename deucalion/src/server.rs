@@ -102,10 +102,7 @@ fn validate_nickname(nickname: &str) -> Result<()> {
     if nickname.len() > 30 {
         return Err(format_err!("Nickname exceeds 30 chars: {nickname:?}"));
     }
-    if !nickname
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !nickname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(format_err!(
             "Nickname contains invalid characters: {nickname:?}"
         ));
@@ -400,10 +397,7 @@ impl Server {
 
         info!("New subscriber connected: {nickname}");
 
-        match self
-            .subscriber_msg_loop(&mut subscriber, &mut nickname, payload_handler)
-            .await
-        {
+        match self.subscriber_msg_loop(&mut subscriber, &mut nickname, payload_handler).await {
             Ok(server_exit) => {
                 if server_exit {
                     return Ok(());
@@ -744,10 +738,7 @@ mod tests {
             handle_server_hello(&mut frames).await;
 
             for (nickname, expected_resp) in testcases {
-                frames
-                    .send(dbg_payload(HELLO_CHANNEL, nickname))
-                    .await
-                    .unwrap();
+                frames.send(dbg_payload(HELLO_CHANNEL, nickname)).await.unwrap();
 
                 let message = frames.next().await.unwrap();
                 if let Ok(payload) = message {
