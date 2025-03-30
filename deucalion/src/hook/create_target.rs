@@ -215,7 +215,7 @@ impl Hook {
         source_actor: usize,
     ) -> usize {
         let _guard = self.wg.add();
-        let packet_data = packet_data as *const u8;
+        let packet_data = packet_data as *mut u8;
         let return_addr = return_addr as *const u8;
         let parent_ptr = self.parent_ptr.load(Ordering::SeqCst) as *const u8;
 

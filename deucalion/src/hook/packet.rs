@@ -167,7 +167,7 @@ pub(super) unsafe fn extract_packets_from_frame(
 pub(super) unsafe fn reconstruct_deobfuscated_packet(
     expected_packet: Packet,
     source_actor: u32,
-    data: *const u8,
+    data: *mut u8,
 ) -> Result<Packet> {
     if let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = expected_packet {
         let header = deucalion_segment_header::View::new(&deucalion_segment_header);
@@ -179,8 +179,8 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
                 source_actor
             ));
         }
-        let data_slice = slice::from_raw_parts(data, data_len);
-        let data = ipc_packet::View::new(data_slice);
+        let data_slice = slice::from_raw_parts_mut(data, data_len);
+        let mut data = ipc_packet::View::new(data_slice);
         if data.header().opcode().read() != opcode {
             return Err(format_err!(
                 "opcode mismatch: expected {}, got {}",
@@ -188,13 +188,15 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
                 opcode
             ));
         }
+        // Clear the padding that was used for bookkeeping
+        data.header_mut().padding_mut().write(0);
 
         let header_len = deucalion_segment_header.len();
         let mut dst = Vec::<u8>::with_capacity(header_len + data_len);
         let buf = dst.spare_capacity_mut();
         let buf: &mut [u8] = mem::transmute(buf);
         buf[..header_len].copy_from_slice(&deucalion_segment_header);
-        buf[header_len..].copy_from_slice(data_slice);
+        buf[header_len..].copy_from_slice(data.into_storage());
         dst.set_len(header_len + data_len);
 
         return Ok(Packet::Ipc(dst));
@@ -287,8 +289,14 @@ mod tests {
             data_len: 24,
         };
 
+        let mut frame_data = DUMMY_FRAME_DATA;
+        // Set the padding that would previously be marked by the packet
+        // extraction
+        frame_data[60] = 0xFF;
+        frame_data[61] = 0xFF;
+
         let reconstructed = unsafe {
-            reconstruct_deobfuscated_packet(packet, 0x04030201, DUMMY_FRAME_DATA[56..].as_ptr())
+            reconstruct_deobfuscated_packet(packet, 0x04030201, frame_data[56..].as_mut_ptr())
                 .unwrap()
         };
 
@@ -302,6 +310,12 @@ mod tests {
             assert_eq!(ipc.header().opcode().read(), 0x142);
             assert_eq!(ipc.header().server_id().read(), 34);
             assert_eq!(ipc.data().len(), 8);
+
+            // Reconstructing the packet should clear the padding that was
+            // used for bookkeeping
+            assert_eq!(ipc.header().padding().read(), 0x0);
+            assert_eq!(frame_data[60], 0);
+            assert_eq!(frame_data[61], 0);
         } else {
             panic!("expected an Ipc Packet");
         }
