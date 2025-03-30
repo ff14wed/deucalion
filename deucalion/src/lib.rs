@@ -134,17 +134,19 @@ async fn main_with_result() -> Result<()> {
 const DLL_PROCESS_ATTACH: u32 = 1;
 
 #[allow(non_snake_case)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "system" fn DllMain(hModule: HINSTANCE, reason: u32, _: u32) -> BOOL {
     if reason == DLL_PROCESS_ATTACH {
-        processthreadsapi::CreateThread(
-            0 as LPSECURITY_ATTRIBUTES,
-            0,
-            Some(main),
-            hModule as LPVOID,
-            0,
-            0 as LPDWORD,
-        );
+        unsafe {
+            processthreadsapi::CreateThread(
+                0 as LPSECURITY_ATTRIBUTES,
+                0,
+                Some(main),
+                hModule as LPVOID,
+                0,
+                0 as LPDWORD,
+            );
+        }
     }
     TRUE
 }
@@ -182,24 +184,34 @@ fn logging_setup() -> Result<()> {
 }
 
 unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
-    #[cfg(debug_assertions)]
-    consoleapi::AllocConsole();
+    unsafe {
+        #[cfg(debug_assertions)]
+        consoleapi::AllocConsole();
+    }
 
     if let Err(e) = logging_setup() {
         println!("Error initializing logger: {e}");
     }
 
-    if let Err(e) = main_with_result() {
-        error!("Encountered fatal error: {e}");
+    let result = std::panic::catch_unwind(|| {
+        if let Err(e) = main_with_result() {
+            error!("Encountered fatal error: {e}");
+            pause();
+        }
+    });
+    if let Err(cause) = result {
+        error!("Panic happened: {cause:?}");
         pause();
     }
-    if let Err(e) = drop_ref_count_to_one(dll_base_addr as HMODULE) {
+    if let Err(e) = unsafe { drop_ref_count_to_one(dll_base_addr as HMODULE) } {
         error!("Could not drop ref count to one: {e}")
     }
     info!("Shut down!");
-    #[cfg(debug_assertions)]
-    wincon::FreeConsole();
-    libloaderapi::FreeLibraryAndExitThread(dll_base_addr as HMODULE, 0);
+    unsafe {
+        #[cfg(debug_assertions)]
+        wincon::FreeConsole();
+        libloaderapi::FreeLibraryAndExitThread(dll_base_addr as HMODULE, 0);
+    }
     // Exit should happen before here
     0
 }

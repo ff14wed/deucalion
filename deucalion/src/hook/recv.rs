@@ -76,10 +76,12 @@ impl Hook {
 
     unsafe fn setup_hook(&self, hook: &StaticHook, channel: Channel, rva: *const u8) -> Result<()> {
         let self_clone = self.clone();
-        let ptr_fn: HookedFunction = mem::transmute(rva as *const ());
-        hook.initialize(ptr_fn, move |a, b, c, d, e| {
-            self_clone.recv_packet(channel, a, b, c, d, e)
-        })?;
+        let ptr_fn: HookedFunction = unsafe { mem::transmute(rva as *const ()) };
+        unsafe {
+            hook.initialize(ptr_fn, move |a, b, c, d, e| {
+                self_clone.recv_packet(channel, a, b, c, d, e)
+            })?;
+        }
         Ok(())
     }
 
@@ -99,10 +101,10 @@ impl Hook {
             Channel::Lobby => &DecompressPacketLobby,
             Channel::Zone => &DecompressPacketZone,
         };
-        let ret = hook.call(a1, a2, a3, a4, a5);
+        let ret = unsafe { hook.call(a1, a2, a3, a4, a5) };
 
-        let ptr_frame = *(a1.add(16) as *const usize) as *mut u8;
-        let offset: u32 = *(a1.add(28) as *const u32);
+        let ptr_frame = unsafe { *(a1.add(16) as *const usize) as *mut u8 };
+        let offset: u32 = unsafe { *(a1.add(28) as *const u32) };
         if offset != 0 {
             return ret;
         }
@@ -118,8 +120,17 @@ impl Hook {
             let _: Vec<_> = self.deobf_queue_rx.try_iter().collect();
         }
 
-        let res = packet::extract_packets_from_frame(ptr_frame, require_deobf).map(|packets| {
-            packets.into_iter().for_each(|packet| match packet {
+        let packets = match unsafe { packet::extract_packets_from_frame(ptr_frame, require_deobf) }
+        {
+            Ok(packets) => packets,
+            Err(e) => {
+                error!("Could not process packet: {e}");
+                return ret;
+            }
+        };
+
+        for packet in packets {
+            match packet {
                 packet::Packet::Ipc(data) => {
                     let _ = self.data_tx.send(rpc::Payload {
                         op: rpc::MessageOps::Recv,
@@ -137,10 +148,7 @@ impl Hook {
                         data,
                     });
                 }
-            });
-        });
-        if let Err(e) = res {
-            error!("Could not process packet: {e}");
+            }
         }
 
         ret

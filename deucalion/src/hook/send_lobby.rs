@@ -45,17 +45,19 @@ impl Hook {
 
     unsafe fn setup_hook(&self, hook: &StaticHook, rva: *const u8) -> Result<()> {
         let self_clone = self.clone();
-        let ptr_fn: HookedFunction = mem::transmute(rva as *const ());
-        hook.initialize(ptr_fn, move |a| self_clone.send_lobby_packet(a))?;
+        let ptr_fn: HookedFunction = unsafe { mem::transmute(rva as *const ()) };
+        unsafe {
+            hook.initialize(ptr_fn, move |a| self_clone.send_lobby_packet(a))?;
+        }
         Ok(())
     }
 
     unsafe fn send_lobby_packet(&self, a1: *const u8) -> usize {
         let _guard = self.wg.add();
 
-        let ptr_frame = *(a1.add(32) as *const usize) as *mut u8;
+        let ptr_frame = unsafe { *(a1.add(32) as *const usize) as *mut u8 };
 
-        match packet::extract_packets_from_frame(ptr_frame, false) {
+        match unsafe { packet::extract_packets_from_frame(ptr_frame, false) } {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
@@ -79,7 +81,7 @@ impl Hook {
             }
         }
 
-        SendLobbyPacket.call(a1)
+        unsafe { SendLobbyPacket.call(a1) }
     }
 
     pub fn shutdown() {

@@ -53,7 +53,7 @@ impl CustomDetour {
     where
         D: Fn(usize, usize, usize) -> usize + Send + 'static,
     {
-        let mut detour = Box::new(RawDetour::new(target, create_target as *const ())?);
+        let mut detour = unsafe { Box::new(RawDetour::new(target, create_target as *const ())?) };
         self.detour
             .compare_exchange(
                 std::ptr::null_mut(),
@@ -70,43 +70,51 @@ impl CustomDetour {
 
     /// Enables the detour.
     pub unsafe fn enable(&self) -> Result<()> {
-        self.detour
-            .load(Ordering::SeqCst)
-            .as_ref()
-            .ok_or(HookError::NotInitialized)?
-            .enable()?;
+        unsafe {
+            self.detour
+                .load(Ordering::SeqCst)
+                .as_ref()
+                .ok_or(HookError::NotInitialized)?
+                .enable()?;
+        }
         Ok(())
     }
 
     /// Disables the detour.
     pub unsafe fn disable(&self) -> Result<()> {
-        self.detour
-            .load(Ordering::SeqCst)
-            .as_ref()
-            .ok_or(HookError::NotInitialized)?
-            .disable()?;
+        unsafe {
+            self.detour
+                .load(Ordering::SeqCst)
+                .as_ref()
+                .ok_or(HookError::NotInitialized)?
+                .disable()?;
+        }
         Ok(())
     }
 
     /// Calls the trampoline for the function being hooked. Ensure the signature
     /// of this function matches the signature of the function being hooked.
     unsafe fn call_trampoline(&self, source_actor: usize) -> Result<usize> {
-        let trampoline: fn(usize) -> usize = mem::transmute(
-            self.detour
-                .load(Ordering::SeqCst)
-                .as_ref()
-                .ok_or(HookError::NotInitialized)?
-                .trampoline(),
-        );
+        let trampoline: fn(usize) -> usize = unsafe {
+            mem::transmute(
+                self.detour
+                    .load(Ordering::SeqCst)
+                    .as_ref()
+                    .ok_or(HookError::NotInitialized)?
+                    .trampoline(),
+            )
+        };
         Ok(trampoline(source_actor))
     }
 
     /// Helper for calling the trampoline with error handling.
     unsafe fn call_original(&self, source_actor: usize) -> usize {
-        self.call_trampoline(source_actor).unwrap_or_else(|e| {
-            error!("{e}");
-            0
-        })
+        unsafe {
+            self.call_trampoline(source_actor).unwrap_or_else(|e| {
+                error!("{e}");
+                0
+            })
+        }
     }
 
     /// Calls the closure that was set for the detour.
@@ -116,8 +124,9 @@ impl CustomDetour {
         return_addr: usize,
         source_actor: usize,
     ) -> Result<usize> {
-        let closure =
-            self.closure.load(Ordering::SeqCst).as_ref().ok_or(HookError::NotInitialized)?;
+        let closure = unsafe {
+            self.closure.load(Ordering::SeqCst).as_ref().ok_or(HookError::NotInitialized)?
+        };
         Ok(closure(packet_data, return_addr, source_actor))
     }
 }
@@ -144,24 +153,26 @@ unsafe extern "C" {
 }
 
 unsafe extern "system" fn create_target(a1: usize) -> usize {
-    let source_actor: usize;
-    let packet_data: *const u8;
-    asm!("
-        # Ensure rsi is preserved before here
-        mov r14, {0}
-        mov {1}, rsi",
-        in(reg) a1,
-        out(reg) packet_data,
-        out("r14") source_actor);
+    unsafe {
+        let source_actor: usize;
+        let packet_data: *const u8;
+        asm!("
+            # Ensure rsi is preserved before here
+            mov r14, {0}
+            mov {1}, rsi",
+            in(reg) a1,
+            out(reg) packet_data,
+            out("r14") source_actor);
 
-    let return_addr = return_address(0);
+        let return_addr = return_address(0);
 
-    DETOUR
-        .call_closure(packet_data as usize, return_addr as usize, source_actor)
-        .unwrap_or_else(|e| {
-            error!("Error in CreateTarget closure: {e}");
-            0
-        })
+        DETOUR
+            .call_closure(packet_data as usize, return_addr as usize, source_actor)
+            .unwrap_or_else(|e| {
+                error!("Error in CreateTarget closure: {e}");
+                0
+            })
+    }
 }
 
 #[derive(Clone)]
@@ -221,26 +232,30 @@ impl Hook {
 
         // Ensure the return address is within the range of the packet dispatch
         // function
-        if parent_ptr.offset_from(return_addr).abs() > 0x2000 {
-            return DETOUR.call_original(source_actor);
+        unsafe {
+            if parent_ptr.offset_from(return_addr).abs() > 0x2000 {
+                return DETOUR.call_original(source_actor);
+            }
         }
-        if *(packet_data.byte_offset(4) as *const u16) != DEUCALION_DEFER_IPC {
+        if unsafe { *(packet_data.byte_offset(4) as *const u16) } != DEUCALION_DEFER_IPC {
             // This packet is unaccounted for in the packet queue, so return.
-            let opcode: u16 = *(packet_data.byte_offset(2) as *const u16);
+            let opcode: u16 = unsafe { *(packet_data.byte_offset(2) as *const u16) };
             warn!(
                 "Packet {opcode} unaccounted for. \
                 This is not necessarily a problem unless it happens too much."
             );
-            return DETOUR.call_original(source_actor);
+            return unsafe { DETOUR.call_original(source_actor) };
         }
 
         let mut packet_sent = false;
         for expected_packet in self.deobf_queue_rx.try_iter() {
-            match packet::reconstruct_deobfuscated_packet(
-                expected_packet,
-                source_actor as u32,
-                packet_data,
-            ) {
+            match unsafe {
+                packet::reconstruct_deobfuscated_packet(
+                    expected_packet,
+                    source_actor as u32,
+                    packet_data,
+                )
+            } {
                 Ok(packet::Packet::Ipc(data)) => {
                     let _ = self.data_tx.send(rpc::Payload {
                         op: rpc::MessageOps::Recv,
@@ -263,11 +278,11 @@ impl Hook {
             // If we went through the entire queue (or if it's empty)
             // without sending a matching, corresponding packet, then
             // give up.
-            let opcode: u16 = *(packet_data.byte_offset(2) as *const u16);
+            let opcode: u16 = unsafe { *(packet_data.byte_offset(2) as *const u16) };
             warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
         }
 
-        DETOUR.call_original(source_actor)
+        unsafe { DETOUR.call_original(source_actor) }
     }
 
     pub fn shutdown() {

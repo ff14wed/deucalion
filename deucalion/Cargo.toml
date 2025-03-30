@@ -2,7 +2,7 @@
 name = "deucalion"
 version = "1.2.0"
 authors = ["ff14wed"]
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 license = "GPL-3.0"
 description = "High-performance Windows library for capturing decoded FFXIV packets."

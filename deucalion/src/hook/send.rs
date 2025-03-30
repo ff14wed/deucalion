@@ -51,19 +51,21 @@ impl Hook {
 
     unsafe fn setup_hook(&self, hook: &StaticHook, channel: Channel, rva: *const u8) -> Result<()> {
         let self_clone = self.clone();
-        let ptr_fn: HookedFunction = mem::transmute(rva as *const ());
-        hook.initialize(ptr_fn, move |a, b| {
-            self_clone.compress_packet(channel, a, b)
-        })?;
+        let ptr_fn: HookedFunction = unsafe { mem::transmute(rva as *const ()) };
+        unsafe {
+            hook.initialize(ptr_fn, move |a, b| {
+                self_clone.compress_packet(channel, a, b)
+            })?;
+        }
         Ok(())
     }
 
     unsafe fn compress_packet(&self, channel: Channel, a1: *const u8, a2: usize) -> usize {
         let _guard = self.wg.add();
 
-        let ptr_frame = *(a1.add(32) as *const usize) as *mut u8;
+        let ptr_frame = unsafe { *(a1.add(32) as *const usize) as *mut u8 };
 
-        match packet::extract_packets_from_frame(ptr_frame, false) {
+        match unsafe { packet::extract_packets_from_frame(ptr_frame, false) } {
             Ok(packets) => {
                 for packet in packets {
                     let payload = match packet {
@@ -90,7 +92,7 @@ impl Hook {
             Channel::Lobby => unreachable!("This hook is not implemented for lobby"),
             Channel::Zone => &CompressPacketZone,
         };
-        hook.call(a1, a2)
+        unsafe { hook.call(a1, a2) }
     }
 
     pub fn shutdown() {

@@ -20,7 +20,7 @@ impl TH32Handle {
         if handle.is_null() {
             return Err(format_err!(
                 "Failed to call CreateToolhelp32Snapshot: {}",
-                GetLastError()
+                unsafe { GetLastError() }
             ));
         }
         Ok(TH32Handle(handle))
@@ -35,18 +35,18 @@ impl Drop for TH32Handle {
 }
 
 unsafe fn get_ref_count(hmodule: HMODULE) -> Result<u32> {
-    let pid = GetCurrentProcessId();
-    let snapshot_handle = TH32Handle::new(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid))?;
+    let pid = unsafe { GetCurrentProcessId() };
+    let snapshot_handle =
+        unsafe { TH32Handle::new(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid))? };
 
-    let mut me32: MODULEENTRY32 = core::mem::zeroed();
+    let mut me32: MODULEENTRY32 = unsafe { core::mem::zeroed() };
     let me32_size = std::mem::size_of::<MODULEENTRY32>() as u32;
     me32.dwSize = me32_size;
 
-    if Module32First(snapshot_handle.0, &mut me32) == 0 {
-        return Err(format_err!(
-            "Failed to call Module32First: {}",
+    if unsafe { Module32First(snapshot_handle.0, &mut me32) } == 0 {
+        return Err(format_err!("Failed to call Module32First: {}", unsafe {
             GetLastError()
-        ));
+        }));
     }
 
     let mut more_modules: bool = true;
@@ -58,13 +58,13 @@ unsafe fn get_ref_count(hmodule: HMODULE) -> Result<u32> {
             }
             return Ok(me32.GlblcntUsage);
         }
-        more_modules = Module32Next(snapshot_handle.0, &mut me32) > 0;
+        more_modules = unsafe { Module32Next(snapshot_handle.0, &mut me32) } > 0;
     }
     Err(format_err!("Could not find ref count for current module"))
 }
 
 pub unsafe fn drop_ref_count_to_one(hmodule: HMODULE) -> Result<()> {
-    let count = get_ref_count(hmodule)?;
+    let count = unsafe { get_ref_count(hmodule)? };
     if count <= 1 {
         return Ok(());
     }
@@ -73,11 +73,10 @@ pub unsafe fn drop_ref_count_to_one(hmodule: HMODULE) -> Result<()> {
         count - 1
     );
     for _ in 0..count - 1 {
-        if FreeLibrary(hmodule) == 0 {
-            return Err(format_err!(
-                "Failed to call FreeLibrary: {}",
+        if unsafe { FreeLibrary(hmodule) } == 0 {
+            return Err(format_err!("Failed to call FreeLibrary: {}", unsafe {
                 GetLastError()
-            ));
+            }));
         };
     }
     Ok(())
