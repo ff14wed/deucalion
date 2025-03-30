@@ -1,41 +1,40 @@
-use core::slice;
-use std::mem;
+use std::slice;
 
 use anyhow::{Result, format_err};
 use binary_layout::prelude::*;
 
 binary_layout!(frame_header, LittleEndian, {
-  magic: [u8; 16],
-  timestamp: u64,
-  size: u32,
-  connection_type: u16,
-  segment_count: u16,
-  unknown_20: u8,
-  compression: u8,
-  unknown_22: u16,
-  decompressed_length: u32,
+    magic: [u8; 16],
+    timestamp: u64,
+    size: u32,
+    connection_type: u16,
+    segment_count: u16,
+    unknown_20: u8,
+    compression: u8,
+    unknown_22: u16,
+    decompressed_length: u32,
 });
 
 binary_layout!(segment_header, LittleEndian, {
-  size: u32,
-  source_actor: u32,
-  target_actor: u32,
-  segment_type: u16,
-  padding: u16,
+    size: u32,
+    source_actor: u32,
+    target_actor: u32,
+    segment_type: u16,
+    padding: u16,
 });
 
 binary_layout!(segment, LittleEndian, {
-  header: segment_header::NestedView,
-  data: [u8],
+    header: segment_header::NestedView,
+    data: [u8],
 });
 
 binary_layout!(ipc_header, LittleEndian, {
-  reserved: u16,
-  opcode: u16,
-  padding: u16,
-  server_id: u16,
-  timestamp: u32,
-  padding1: u32,
+    reserved: u16,
+    opcode: u16,
+    padding: u16,
+    server_id: u16,
+    timestamp: u32,
+    padding1: u32,
 });
 
 /// Set the highest bit in padding after the ipc_header opcode to indicate
@@ -68,10 +67,12 @@ pub(super) enum Packet {
     Other(Vec<u8>),
 }
 
-/// Extract packets from a pointer to a frame. Ensure ptr_frame is a valid
-/// pointer or the process will crash!
-/// May potentially modify data in the frame for bookkeeping (should not affect
-/// the game in any way).
+/// Extract packets from a pointer to a frame.
+///
+/// # Safety
+/// Ensure ptr_frame is a valid pointer or the process will crash! This may
+/// potentially modify data in the frame for bookkeeping (should not affect the
+/// game in any way).
 pub(super) unsafe fn extract_packets_from_frame(
     ptr_frame: *mut u8,
     require_deobfuscation: bool,
@@ -81,7 +82,7 @@ pub(super) unsafe fn extract_packets_from_frame(
             "hook was called with a null pointer. Skipping."
         ));
     }
-    let frame_header_bytes = slice::from_raw_parts(ptr_frame, 40);
+    let frame_header_bytes = unsafe { slice::from_raw_parts(ptr_frame, 40) };
     let frame_header = frame_header::View::new(frame_header_bytes);
 
     let compression: u8 = frame_header.compression().read();
@@ -98,10 +99,12 @@ pub(super) unsafe fn extract_packets_from_frame(
         return Err(format_err!("frame_size is invalid: {}", frame_size));
     }
 
-    let frame_data = slice::from_raw_parts_mut(
-        ptr_frame.add(frame_header_size),
-        frame_size - frame_header_size,
-    );
+    let frame_data = unsafe {
+        slice::from_raw_parts_mut(
+            ptr_frame.add(frame_header_size),
+            frame_size - frame_header_size,
+        )
+    };
 
     let mut frame_data_offset: usize = 0;
 
@@ -119,51 +122,55 @@ pub(super) unsafe fn extract_packets_from_frame(
         let mut segment = segment::View::new(segment_bytes);
         frame_data_offset += segment_size as usize;
 
-        if segment.header().segment_type().read() == 3 {
-            // If IPC segment type, decode it and wrap it with a deucalion_segment
-            let segment_header = segment.header();
-            let deucalion_header_size = deucalion_segment_header::SIZE.unwrap();
-
-            let payload_len = if require_deobfuscation {
-                deucalion_header_size
-            } else {
-                deucalion_header_size + segment_size as usize - segment_header_size
-            };
-            let mut dst = Vec::<u8>::with_capacity(payload_len);
-            let buf = dst.spare_capacity_mut();
-            let buf: &mut [u8] = mem::transmute(buf);
-            dst.set_len(payload_len);
-
-            let mut deucalion_segment = deucalion_segment::View::new(buf);
-            let mut dsh = deucalion_segment.header_mut();
-            dsh.source_actor_mut().write(segment_header.source_actor().read());
-            dsh.target_actor_mut().write(segment_header.target_actor().read());
-            dsh.timestamp_mut().write(frame_header.timestamp().read());
-
-            if require_deobfuscation {
-                let mut ipc_packet = ipc_packet::View::new(segment.data_mut());
-                let opcode = ipc_packet.header().opcode().read();
-                // Mark the underlying packet data for bookkeeping after deobfuscation
-                ipc_packet.header_mut().padding_mut().write(DEUCALION_DEFER_IPC);
-                let data_len = segment.data().len();
-                packets.push(Packet::ObfuscatedIpc {
-                    deucalion_segment_header: dst,
-                    opcode,
-                    data_len,
-                });
-            } else {
-                deucalion_segment.data_mut().copy_from_slice(segment.data());
-                packets.push(Packet::Ipc(dst));
-            }
-        } else {
-            // Otherwise just copy the segment as-is
-            let dst = Vec::from(segment.into_storage());
-            packets.push(Packet::Other(dst));
+        if segment.header().segment_type().read() != 3 {
+            // For non-IPC segment types just copy the data as-is
+            packets.push(Packet::Other(Vec::from(segment.into_storage())));
+            continue;
         }
+
+        // If IPC segment type, decode it and wrap it with a deucalion_segment
+        let deucalion_header_size = deucalion_segment_header::SIZE.unwrap();
+        let mut payload_len = deucalion_header_size;
+        if !require_deobfuscation {
+            payload_len += segment_size as usize - segment_header_size;
+        };
+
+        let mut buf = Vec::<u8>::with_capacity(payload_len);
+        buf.resize(deucalion_header_size, 0);
+        let mut header_view = deucalion_segment_header::View::new(buf);
+        header_view.source_actor_mut().write(segment.header().source_actor().read());
+        header_view.target_actor_mut().write(segment.header().target_actor().read());
+        header_view.timestamp_mut().write(frame_header.timestamp().read());
+        let deucalion_header = header_view.into_storage();
+
+        if !require_deobfuscation {
+            // For non-obfuscated packets, include the segment data
+            let mut packet_data = deucalion_header;
+            packet_data.extend_from_slice(segment.data());
+            packets.push(Packet::Ipc(packet_data));
+            continue;
+        }
+        // For obfuscated packets, mark for later deobfuscation
+        let mut ipc_packet = ipc_packet::View::new(segment.data_mut());
+        let opcode = ipc_packet.header().opcode().read();
+        // Mark the underlying packet data for bookkeeping after deobfuscation
+        ipc_packet.header_mut().padding_mut().write(DEUCALION_DEFER_IPC);
+        packets.push(Packet::ObfuscatedIpc {
+            deucalion_segment_header: deucalion_header,
+            opcode,
+            data_len: segment.data().len(),
+        });
     }
     Ok(packets)
 }
 
+/// Reconstruct a deobfuscated packet from an expected packet header and
+/// deobfuscated packet data.
+///
+/// # Safety
+/// Ensure data is a valid pointer or the process will crash! This will modify
+/// the data in-place to clear the padding field used for bookkeeping (though
+/// this should not affect the game in any way).
 pub(super) unsafe fn reconstruct_deobfuscated_packet(
     expected_packet: Packet,
     source_actor: u32,
@@ -182,7 +189,7 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
             source_actor
         ));
     }
-    let data_slice = slice::from_raw_parts_mut(data, data_len);
+    let data_slice = unsafe { slice::from_raw_parts_mut(data, data_len) };
     let mut data = ipc_packet::View::new(data_slice);
     if data.header().opcode().read() != opcode {
         return Err(format_err!(
@@ -196,11 +203,8 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
 
     let header_len = deucalion_segment_header.len();
     let mut dst = Vec::<u8>::with_capacity(header_len + data_len);
-    let buf = dst.spare_capacity_mut();
-    let buf: &mut [u8] = mem::transmute(buf);
-    buf[..header_len].copy_from_slice(&deucalion_segment_header);
-    buf[header_len..].copy_from_slice(data.into_storage());
-    dst.set_len(header_len + data_len);
+    dst.extend_from_slice(&deucalion_segment_header);
+    dst.extend_from_slice(data.into_storage());
 
     Ok(Packet::Ipc(dst))
 }
@@ -208,6 +212,7 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     const DUMMY_FRAME_DATA: [u8; 80] = [
         0x52, 0x52, 0xa0, 0x41, 0xff, 0x5d, 0x46, 0xe2, // magic (part 1)
         0x7f, 0x2a, 0x64, 0x4d, 0x7b, 0x99, 0xc4, 0x75, // magic (part 2)
