@@ -29,6 +29,8 @@ use log::{error, info};
 use simplelog::{CombinedLogger, SimpleLogger};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const COMMIT_SHA: &str = env!("VERGEN_GIT_SHA");
+const COMMIT_DIRTY: &str = env!("VERGEN_GIT_DIRTY");
 
 const RECV_SIG: &str = "E8 $ { ' } 4C 8B 4F 10 8B 47 1C 45";
 const SEND_SIG: &str = "40 57 41 56 48 83 EC 38 48 8B F9 4C 8B F2";
@@ -74,7 +76,8 @@ fn auto_initialize_hooks(hs: &Arc<hook::State>) -> (bool, bool, bool, bool) {
 
 #[tokio::main]
 async fn main_with_result() -> Result<()> {
-    info!("Starting Deucalion v{VERSION}");
+    let dirty = if COMMIT_DIRTY == "true" { "(dirty)" } else { "" };
+    info!("Starting Deucalion v{VERSION}-{COMMIT_SHA}{dirty}",);
     let hs = Arc::new(hook::State::new().context("error setting up the hook")?);
     let deucalion_server = server::Server::new();
     info!("Attempting to auto-initialize the hooks");

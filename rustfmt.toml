@@ -3,3 +3,4 @@ imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
 struct_lit_width = 60
 chain_width = 80
+single_line_if_else_max_width = 60
