@@ -73,15 +73,16 @@ impl RawWaitGroup {
     pub fn add(&self) {
         loop {
             let current_active = self.active.load(Ordering::SeqCst);
-            if let Ok(previous_active) = self.active.compare_exchange(
+            let Ok(previous_active) = self.active.compare_exchange(
                 current_active,
                 current_active + 1,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
-            ) {
-                if previous_active == current_active {
-                    return;
-                }
+            ) else {
+                continue;
+            };
+            if previous_active == current_active {
+                return;
             }
         }
     }

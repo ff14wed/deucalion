@@ -27,11 +27,10 @@ async fn signal_pipe(pipe_name: &str) {
 
     // Handle the SERVER_HELLO message
     let peer_message = frames.next().await.unwrap();
-    if let Ok(payload) = peer_message {
-        assert_eq!(payload.ctx, 9000);
-    } else {
+    let Ok(payload) = peer_message else {
         panic!("Did not properly receive Server Hello");
-    }
+    };
+    assert_eq!(payload.ctx, 9000);
 
     // Send exit
     frames

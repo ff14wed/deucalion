@@ -169,40 +169,40 @@ pub(super) unsafe fn reconstruct_deobfuscated_packet(
     source_actor: u32,
     data: *mut u8,
 ) -> Result<Packet> {
-    if let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = expected_packet {
-        let header = deucalion_segment_header::View::new(&deucalion_segment_header);
-        let expected_source_actor = header.source_actor().read();
-        if source_actor != expected_source_actor {
-            return Err(format_err!(
-                "source_actor mismatch: expected {}, got {}",
-                expected_source_actor,
-                source_actor
-            ));
-        }
-        let data_slice = slice::from_raw_parts_mut(data, data_len);
-        let mut data = ipc_packet::View::new(data_slice);
-        if data.header().opcode().read() != opcode {
-            return Err(format_err!(
-                "opcode mismatch: expected {}, got {}",
-                data.header().opcode().read(),
-                opcode
-            ));
-        }
-        // Clear the padding that was used for bookkeeping
-        data.header_mut().padding_mut().write(0);
-
-        let header_len = deucalion_segment_header.len();
-        let mut dst = Vec::<u8>::with_capacity(header_len + data_len);
-        let buf = dst.spare_capacity_mut();
-        let buf: &mut [u8] = mem::transmute(buf);
-        buf[..header_len].copy_from_slice(&deucalion_segment_header);
-        buf[header_len..].copy_from_slice(data.into_storage());
-        dst.set_len(header_len + data_len);
-
-        return Ok(Packet::Ipc(dst));
+    let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = expected_packet
+    else {
+        return Err(format_err!("packet is not an obfuscated IPC packet"));
+    };
+    let header = deucalion_segment_header::View::new(&deucalion_segment_header);
+    let expected_source_actor = header.source_actor().read();
+    if source_actor != expected_source_actor {
+        return Err(format_err!(
+            "source_actor mismatch: expected {}, got {}",
+            expected_source_actor,
+            source_actor
+        ));
     }
+    let data_slice = slice::from_raw_parts_mut(data, data_len);
+    let mut data = ipc_packet::View::new(data_slice);
+    if data.header().opcode().read() != opcode {
+        return Err(format_err!(
+            "opcode mismatch: expected {}, got {}",
+            data.header().opcode().read(),
+            opcode
+        ));
+    }
+    // Clear the padding that was used for bookkeeping
+    data.header_mut().padding_mut().write(0);
 
-    Err(format_err!("packet is not an obfuscated IPC packet"))
+    let header_len = deucalion_segment_header.len();
+    let mut dst = Vec::<u8>::with_capacity(header_len + data_len);
+    let buf = dst.spare_capacity_mut();
+    let buf: &mut [u8] = mem::transmute(buf);
+    buf[..header_len].copy_from_slice(&deucalion_segment_header);
+    buf[header_len..].copy_from_slice(data.into_storage());
+    dst.set_len(header_len + data_len);
+
+    Ok(Packet::Ipc(dst))
 }
 
 #[cfg(test)]
@@ -240,21 +240,22 @@ mod tests {
         let packets =
             unsafe { extract_packets_from_frame(frame_data.as_mut_ptr(), false).unwrap() };
         assert_eq!(packets.len(), 1);
-        if let Packet::Ipc(data) = &packets[0] {
-            let segment = deucalion_segment::View::new(data);
-            assert_eq!(segment.header().source_actor().read(), 0x04030201);
-            assert_eq!(segment.header().target_actor().read(), 0x08070605);
-            // Ensure the timestamp matches the frame timestamp
-            assert_eq!(segment.header().timestamp().read(), 0x159da93f6e6);
-            let ipc = ipc_packet::View::new(segment.data());
-            assert_eq!(ipc.header().opcode().read(), 0x142);
-            assert_eq!(ipc.header().server_id().read(), 34);
-            assert_eq!(ipc.data().len(), 8);
-            // Ensure that with obfuscation the padding is used for bookkeeping
-            assert_eq!(frame_data[61], 0);
-        } else {
+
+        let Packet::Ipc(data) = &packets[0] else {
             panic!("expected an Ipc Packet");
-        }
+        };
+
+        let segment = deucalion_segment::View::new(data);
+        assert_eq!(segment.header().source_actor().read(), 0x04030201);
+        assert_eq!(segment.header().target_actor().read(), 0x08070605);
+        // Ensure the timestamp matches the frame timestamp
+        assert_eq!(segment.header().timestamp().read(), 0x159da93f6e6);
+        let ipc = ipc_packet::View::new(segment.data());
+        assert_eq!(ipc.header().opcode().read(), 0x142);
+        assert_eq!(ipc.header().server_id().read(), 34);
+        assert_eq!(ipc.data().len(), 8);
+        // Ensure that with obfuscation the padding is used for bookkeeping
+        assert_eq!(frame_data[61], 0);
     }
 
     #[test]
@@ -262,19 +263,21 @@ mod tests {
         let mut frame_data = DUMMY_FRAME_DATA;
         let packets = unsafe { extract_packets_from_frame(frame_data.as_mut_ptr(), true).unwrap() };
         assert_eq!(packets.len(), 1);
-        if let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = &packets[0] {
-            let header = deucalion_segment_header::View::new(deucalion_segment_header);
-            assert_eq!(header.source_actor().read(), 0x04030201);
-            assert_eq!(header.target_actor().read(), 0x08070605);
-            // Ensure the timestamp matches the frame timestamp
-            assert_eq!(header.timestamp().read(), 0x159da93f6e6);
-            assert_eq!(*opcode, 0x142);
-            assert_eq!(*data_len, 24);
-            // Ensure that with obfuscation the padding is used for bookkeeping
-            assert_eq!(frame_data[61], (DEUCALION_DEFER_IPC >> 8) as u8);
-        } else {
+
+        let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = &packets[0]
+        else {
             panic!("expected an ObfuscatedIpc Packet");
-        }
+        };
+
+        let header = deucalion_segment_header::View::new(deucalion_segment_header);
+        assert_eq!(header.source_actor().read(), 0x04030201);
+        assert_eq!(header.target_actor().read(), 0x08070605);
+        // Ensure the timestamp matches the frame timestamp
+        assert_eq!(header.timestamp().read(), 0x159da93f6e6);
+        assert_eq!(*opcode, 0x142);
+        assert_eq!(*data_len, 24);
+        // Ensure that with obfuscation the padding is used for bookkeeping
+        assert_eq!(frame_data[61], (DEUCALION_DEFER_IPC >> 8) as u8);
     }
 
     #[test]
@@ -300,24 +303,24 @@ mod tests {
                 .unwrap()
         };
 
-        if let Packet::Ipc(data) = reconstructed {
-            let segment = deucalion_segment::View::new(data);
-            assert_eq!(segment.header().source_actor().read(), 0x04030201);
-            assert_eq!(segment.header().target_actor().read(), 0x08070605);
-            // Ensure the timestamp matches the frame timestamp
-            assert_eq!(segment.header().timestamp().read(), 0x159da93f6e6);
-            let ipc = ipc_packet::View::new(segment.data());
-            assert_eq!(ipc.header().opcode().read(), 0x142);
-            assert_eq!(ipc.header().server_id().read(), 34);
-            assert_eq!(ipc.data().len(), 8);
-
-            // Reconstructing the packet should clear the padding that was
-            // used for bookkeeping
-            assert_eq!(ipc.header().padding().read(), 0x0);
-            assert_eq!(frame_data[60], 0);
-            assert_eq!(frame_data[61], 0);
-        } else {
+        let Packet::Ipc(data) = reconstructed else {
             panic!("expected an Ipc Packet");
-        }
+        };
+
+        let segment = deucalion_segment::View::new(data);
+        assert_eq!(segment.header().source_actor().read(), 0x04030201);
+        assert_eq!(segment.header().target_actor().read(), 0x08070605);
+        // Ensure the timestamp matches the frame timestamp
+        assert_eq!(segment.header().timestamp().read(), 0x159da93f6e6);
+        let ipc = ipc_packet::View::new(segment.data());
+        assert_eq!(ipc.header().opcode().read(), 0x142);
+        assert_eq!(ipc.header().server_id().read(), 34);
+        assert_eq!(ipc.data().len(), 8);
+
+        // Reconstructing the packet should clear the padding that was
+        // used for bookkeeping
+        assert_eq!(ipc.header().padding().read(), 0x0);
+        assert_eq!(frame_data[60], 0);
+        assert_eq!(frame_data[61], 0);
     }
 }

@@ -652,15 +652,15 @@ mod tests {
                 .unwrap();
 
             let message = frames.next().await.unwrap();
-            if let Ok(payload) = message {
-                assert_eq!(payload.op, MessageOps::Debug);
-                assert_eq!(
-                    String::from_utf8(payload.data).unwrap(),
-                    "Packet filters set: 0b00100110",
-                );
-            } else {
+            let Ok(payload) = message else {
                 panic!("Did not properly receive packet filter confirmation");
-            }
+            };
+
+            assert_eq!(payload.op, MessageOps::Debug);
+            assert_eq!(
+                String::from_utf8(payload.data).unwrap(),
+                "Packet filters set: 0b00100110",
+            );
 
             let configurations = vec![
                 (MessageOps::Recv, 0, false),
@@ -741,16 +741,16 @@ mod tests {
                 frames.send(dbg_payload(HELLO_CHANNEL, nickname)).await.unwrap();
 
                 let message = frames.next().await.unwrap();
-                if let Ok(payload) = message {
-                    assert_eq!(payload.op, MessageOps::Debug);
-                    assert_eq!(
-                        String::from_utf8(payload.data).unwrap(),
-                        expected_resp,
-                        "Expected response did not match"
-                    );
-                } else {
+                let Ok(payload) = message else {
                     panic!("Did not receive subscriber nickname confirmation");
-                }
+                };
+
+                assert_eq!(payload.op, MessageOps::Debug);
+                assert_eq!(
+                    String::from_utf8(payload.data).unwrap(),
+                    expected_resp,
+                    "Expected response did not match"
+                );
             }
         });
 
@@ -909,15 +909,14 @@ mod tests {
             // Test that every packet was received in order
             let mut num_received = 0u32;
             while let Some(result) = frames.next().await {
-                if let Ok(payload) = result {
-                    assert_eq!(
-                        payload.ctx, num_received,
-                        "Received data from pipe does not match expected index!"
-                    );
-                    num_received += 1;
-                    if num_received >= NUM_PACKETS {
-                        return;
-                    }
+                let Ok(payload) = result else { continue };
+                assert_eq!(
+                    payload.ctx, num_received,
+                    "Received data from pipe does not match expected index!"
+                );
+                num_received += 1;
+                if num_received >= NUM_PACKETS {
+                    return;
                 }
             }
         });
@@ -940,11 +939,12 @@ mod tests {
             let pipe_name_clone = pipe_name.clone();
             let sub_handle = tokio::spawn(async move {
                 // If the subscriber couldn't connect it's okay
-                if let Ok(subscriber) = Endpoint::connect(&pipe_name_clone).await {
-                    let codec = PayloadCodec::new();
-                    let mut frames = Framed::new(subscriber, codec);
-                    while frames.next().await.is_some() {}
-                }
+                let Ok(subscriber) = Endpoint::connect(&pipe_name_clone).await else {
+                    return;
+                };
+                let codec = PayloadCodec::new();
+                let mut frames = Framed::new(subscriber, codec);
+                while frames.next().await.is_some() {}
             });
             sub_handle.abort();
         }
