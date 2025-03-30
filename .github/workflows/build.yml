@@ -10,14 +10,12 @@ env:
 
 jobs:
   build:
-    runs-on: windows-2019
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
     - name: Install latest nightly
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@nightly
       with:
-        toolchain: nightly
-        override: true
         components: rustfmt, clippy
     # For some reason, building deucalion inside its own directory yields
     # a smaller binary
