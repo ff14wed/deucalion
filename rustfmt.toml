@@ -2,3 +2,4 @@ style_edition = "2024"
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
 struct_lit_width = 60
+chain_width = 80

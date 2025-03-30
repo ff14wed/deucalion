@@ -38,6 +38,10 @@ binary_layout!(ipc_header, LittleEndian, {
   padding1: u32,
 });
 
+/// Set the highest bit in padding after the ipc_header opcode to indicate
+/// that Deucalion has marked this IPC packet for later deobfuscation.
+const DEUCALION_DEFER_IPC: u16 = 0x8000;
+
 binary_layout!(ipc_packet, LittleEndian, {
   header: ipc_header::NestedView,
   data: [u8],
@@ -66,8 +70,10 @@ pub(super) enum Packet {
 
 /// Extract packets from a pointer to a frame. Ensure ptr_frame is a valid
 /// pointer or the process will crash!
+/// May potentially modify data in the frame for bookkeeping (should not affect
+/// the game in any way).
 pub(super) unsafe fn extract_packets_from_frame(
-    ptr_frame: *const u8,
+    ptr_frame: *mut u8,
     require_deobfuscation: bool,
 ) -> Result<Vec<Packet>> {
     if ptr_frame.is_null() {
@@ -92,7 +98,7 @@ pub(super) unsafe fn extract_packets_from_frame(
         return Err(format_err!("frame_size is invalid: {}", frame_size));
     }
 
-    let frame_data = slice::from_raw_parts(
+    let frame_data = slice::from_raw_parts_mut(
         ptr_frame.add(frame_header_size),
         frame_size - frame_header_size,
     );
@@ -109,8 +115,8 @@ pub(super) unsafe fn extract_packets_from_frame(
         }
 
         let segment_bytes =
-            &frame_data[frame_data_offset..frame_data_offset + segment_size as usize];
-        let segment = segment::View::new(segment_bytes);
+            &mut frame_data[frame_data_offset..frame_data_offset + segment_size as usize];
+        let mut segment = segment::View::new(segment_bytes);
         frame_data_offset += segment_size as usize;
 
         if segment.header().segment_type().read() == 3 {
@@ -130,15 +136,15 @@ pub(super) unsafe fn extract_packets_from_frame(
 
             let mut deucalion_segment = deucalion_segment::View::new(buf);
             let mut dsh = deucalion_segment.header_mut();
-            dsh.source_actor_mut()
-                .write(segment_header.source_actor().read());
-            dsh.target_actor_mut()
-                .write(segment_header.target_actor().read());
+            dsh.source_actor_mut().write(segment_header.source_actor().read());
+            dsh.target_actor_mut().write(segment_header.target_actor().read());
             dsh.timestamp_mut().write(frame_header.timestamp().read());
 
             if require_deobfuscation {
-                let ipc_packet = ipc_packet::View::new(segment.data());
+                let mut ipc_packet = ipc_packet::View::new(segment.data_mut());
                 let opcode = ipc_packet.header().opcode().read();
+                // Mark the underlying packet data for bookkeeping after deobfuscation
+                ipc_packet.header_mut().padding_mut().write(DEUCALION_DEFER_IPC);
                 let data_len = segment.data().len();
                 packets.push(Packet::ObfuscatedIpc {
                     deucalion_segment_header: dst,
@@ -151,7 +157,7 @@ pub(super) unsafe fn extract_packets_from_frame(
             }
         } else {
             // Otherwise just copy the segment as-is
-            let dst = Vec::from(segment_bytes);
+            let dst = Vec::from(segment.into_storage());
             packets.push(Packet::Other(dst));
         }
     }
@@ -228,8 +234,9 @@ mod tests {
 
     #[test]
     fn test_extract_packets_from_frame_without_obfuscation() {
+        let mut frame_data = DUMMY_FRAME_DATA;
         let packets =
-            unsafe { extract_packets_from_frame(DUMMY_FRAME_DATA.as_ptr(), false).unwrap() };
+            unsafe { extract_packets_from_frame(frame_data.as_mut_ptr(), false).unwrap() };
         assert_eq!(packets.len(), 1);
         if let Packet::Ipc(data) = &packets[0] {
             let segment = deucalion_segment::View::new(data);
@@ -241,6 +248,8 @@ mod tests {
             assert_eq!(ipc.header().opcode().read(), 0x142);
             assert_eq!(ipc.header().server_id().read(), 34);
             assert_eq!(ipc.data().len(), 8);
+            // Ensure that with obfuscation the padding is used for bookkeeping
+            assert_eq!(frame_data[61], 0);
         } else {
             panic!("expected an Ipc Packet");
         }
@@ -248,8 +257,8 @@ mod tests {
 
     #[test]
     fn test_extract_packets_from_frame_with_obfuscation() {
-        let packets =
-            unsafe { extract_packets_from_frame(DUMMY_FRAME_DATA.as_ptr(), true).unwrap() };
+        let mut frame_data = DUMMY_FRAME_DATA;
+        let packets = unsafe { extract_packets_from_frame(frame_data.as_mut_ptr(), true).unwrap() };
         assert_eq!(packets.len(), 1);
         if let Packet::ObfuscatedIpc { deucalion_segment_header, opcode, data_len } = &packets[0] {
             let header = deucalion_segment_header::View::new(deucalion_segment_header);
@@ -259,6 +268,8 @@ mod tests {
             assert_eq!(header.timestamp().read(), 0x159da93f6e6);
             assert_eq!(*opcode, 0x142);
             assert_eq!(*data_len, 24);
+            // Ensure that with obfuscation the padding is used for bookkeeping
+            assert_eq!(frame_data[61], (DEUCALION_DEFER_IPC >> 8) as u8);
         } else {
             panic!("expected an ObfuscatedIpc Packet");
         }

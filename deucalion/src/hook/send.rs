@@ -61,7 +61,7 @@ impl Hook {
     unsafe fn compress_packet(&self, channel: Channel, a1: *const u8, a2: usize) -> usize {
         let _guard = self.wg.add();
 
-        let ptr_frame: *const u8 = *(a1.add(32) as *const usize) as *const u8;
+        let ptr_frame = *(a1.add(32) as *const usize) as *mut u8;
 
         match packet::extract_packets_from_frame(ptr_frame, false) {
             Ok(packets) => {

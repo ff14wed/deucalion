@@ -46,8 +46,7 @@ impl Hook {
     }
 
     pub fn set_create_target_hook_enabled(&self, enabled: bool) {
-        self.create_target_hook_enabled
-            .store(enabled, Ordering::SeqCst);
+        self.create_target_hook_enabled.store(enabled, Ordering::SeqCst);
     }
 
     pub fn setup(&self, rvas: Vec<usize>) -> Result<()> {
@@ -99,7 +98,7 @@ impl Hook {
         };
         let ret = hook.call(a1, a2, a3, a4, a5);
 
-        let ptr_frame: *const u8 = *(a1.add(16) as *const usize) as *const u8;
+        let ptr_frame = *(a1.add(16) as *const usize) as *mut u8;
         let offset: u32 = *(a1.add(28) as *const u32);
         if offset != 0 {
             return ret;
