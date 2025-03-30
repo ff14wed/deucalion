@@ -32,6 +32,6 @@ jobs:
         if grep "# Ensure rsi" "target/release/deps/deucalion.s" -B 20 \
          | grep ".seh_endprologue" -A 10 \
          | grep -q "movq.*, %rsi$"; then
-          echo "Something found using rsi as a destination register" >> /dev/stderr
+          echo "Something found using rsi as a destination register"
           exit 1
         fi
