@@ -40,7 +40,7 @@ binary_layout!(ipc_header, LittleEndian, {
 
 /// Set the highest bit in padding after the ipc_header opcode to indicate
 /// that Deucalion has marked this IPC packet for later deobfuscation.
-const DEUCALION_DEFER_IPC: u16 = 0x8000;
+pub(super) const DEUCALION_DEFER_IPC: u16 = 0x8000;
 
 binary_layout!(ipc_packet, LittleEndian, {
   header: ipc_header::NestedView,

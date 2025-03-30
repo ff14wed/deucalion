@@ -15,7 +15,11 @@ use log::{error, warn};
 use retour::RawDetour;
 use tokio::sync::mpsc;
 
-use super::{Channel, HookError, packet, waitgroup};
+use super::{
+    Channel, HookError,
+    packet::{self, DEUCALION_DEFER_IPC},
+    waitgroup,
+};
 use crate::{procloader::get_ffxiv_handle, rpc};
 
 // Once initialized, it's important to keep this in memory so that any
@@ -59,8 +63,7 @@ impl CustomDetour {
             )
             .map_err(|_| HookError::AlreadyInitialized)?;
 
-        self.closure
-            .store(Box::into_raw(Box::new(Box::new(closure))), Ordering::SeqCst);
+        self.closure.store(Box::into_raw(Box::new(Box::new(closure))), Ordering::SeqCst);
         mem::forget(detour);
         Ok(())
     }
@@ -98,6 +101,14 @@ impl CustomDetour {
         Ok(trampoline(source_actor))
     }
 
+    /// Helper for calling the trampoline with error handling.
+    unsafe fn call_original(&self, source_actor: usize) -> usize {
+        self.call_trampoline(source_actor).unwrap_or_else(|e| {
+            error!("{e}");
+            0
+        })
+    }
+
     /// Calls the closure that was set for the detour.
     unsafe fn call_closure(
         &self,
@@ -105,11 +116,8 @@ impl CustomDetour {
         return_addr: usize,
         source_actor: usize,
     ) -> Result<usize> {
-        let closure = self
-            .closure
-            .load(Ordering::SeqCst)
-            .as_ref()
-            .ok_or(HookError::NotInitialized)?;
+        let closure =
+            self.closure.load(Ordering::SeqCst).as_ref().ok_or(HookError::NotInitialized)?;
         Ok(closure(packet_data, return_addr, source_actor))
     }
 }
@@ -211,42 +219,55 @@ impl Hook {
         let return_addr = return_addr as *const u8;
         let parent_ptr = self.parent_ptr.load(Ordering::SeqCst) as *const u8;
 
-        if parent_ptr.offset_from(return_addr).abs() < 0x2000 {
-            let mut packet_sent = false;
-            for expected_packet in self.deobf_queue_rx.try_iter() {
-                match packet::reconstruct_deobfuscated_packet(
-                    expected_packet,
-                    source_actor as u32,
-                    packet_data,
-                ) {
-                    Ok(packet::Packet::Ipc(data)) => {
-                        let _ = self.data_tx.send(rpc::Payload {
-                            op: rpc::MessageOps::Recv,
-                            ctx: Channel::Zone as u32,
-                            data,
-                        });
-                        packet_sent = true;
-                        break;
-                    }
-                    Ok(_) => unreachable!("Reconstruct should only send Ipc packets"),
-                    Err(e) => {
-                        warn!("Failed to reconstruct deobfuscated packet: {e}");
-                    }
-                }
-            }
-            if !packet_sent {
-                // If we went through the entire queue (or if it's empty)
-                // without sending a matching, corresponding packet, then
-                // give up.
-                let opcode: u16 = *(packet_data.byte_offset(2) as *const u16);
-                warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
-            }
+        // Ensure the return address is within the range of the packet dispatch
+        // function
+        if parent_ptr.offset_from(return_addr).abs() > 0x2000 {
+            return DETOUR.call_original(source_actor);
+        }
+        if *(packet_data.byte_offset(4) as *const u16) != DEUCALION_DEFER_IPC {
+            // This packet is unaccounted for in the packet queue, so return.
+            let opcode: u16 = *(packet_data.byte_offset(2) as *const u16);
+            warn!(
+                "Packet {opcode} unaccounted for. \
+                This is not necessarily a problem unless it happens too much."
+            );
+            return DETOUR.call_original(source_actor);
         }
 
-        DETOUR.call_trampoline(source_actor).unwrap_or_else(|e| {
-            error!("{e}");
-            0
-        })
+        let mut packet_sent = false;
+        for expected_packet in self.deobf_queue_rx.try_iter() {
+            match packet::reconstruct_deobfuscated_packet(
+                expected_packet,
+                source_actor as u32,
+                packet_data,
+            ) {
+                Ok(packet::Packet::Ipc(data)) => {
+                    let _ = self.data_tx.send(rpc::Payload {
+                        op: rpc::MessageOps::Recv,
+                        ctx: Channel::Zone as u32,
+                        data,
+                    });
+                    packet_sent = true;
+                    break;
+                }
+                Ok(_) => unreachable!("Reconstruct should only send Ipc packets"),
+                Err(e) => {
+                    warn!(
+                        "Failed to reconstruct deobfuscated packet. \
+                        Skipping to the next packet in the queue: {e}."
+                    );
+                }
+            }
+        }
+        if !packet_sent {
+            // If we went through the entire queue (or if it's empty)
+            // without sending a matching, corresponding packet, then
+            // give up.
+            let opcode: u16 = *(packet_data.byte_offset(2) as *const u16);
+            warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
+        }
+
+        DETOUR.call_original(source_actor)
     }
 
     pub fn shutdown() {

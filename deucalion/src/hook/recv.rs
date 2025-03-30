@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Result;
-use log::error;
+use log::{error, warn};
 use retour::{StaticDetour, static_detour};
 use tokio::sync::mpsc;
 
@@ -27,6 +27,7 @@ static_detour! {
 pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
     deobf_queue_tx: crossbeam_channel::Sender<packet::Packet>,
+    deobf_queue_rx: crossbeam_channel::Receiver<packet::Packet>,
     create_target_hook_enabled: Arc<AtomicBool>,
     wg: waitgroup::WaitGroup,
 }
@@ -35,11 +36,13 @@ impl Hook {
     pub fn new(
         data_tx: mpsc::UnboundedSender<rpc::Payload>,
         deobf_queue_tx: crossbeam_channel::Sender<packet::Packet>,
+        deobf_queue_rx: crossbeam_channel::Receiver<packet::Packet>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook> {
         Ok(Hook {
             data_tx,
             deobf_queue_tx,
+            deobf_queue_rx,
             create_target_hook_enabled: Arc::new(AtomicBool::new(false)),
             wg,
         })
@@ -109,6 +112,11 @@ impl Hook {
         } else {
             false
         };
+
+        if require_deobf && !self.deobf_queue_rx.is_empty() {
+            warn!("Packet queue has not been fully read. The queue will be emptied.");
+            let _: Vec<_> = self.deobf_queue_rx.try_iter().collect();
+        }
 
         let res = packet::extract_packets_from_frame(ptr_frame, require_deobf).map(|packets| {
             packets.into_iter().for_each(|packet| match packet {

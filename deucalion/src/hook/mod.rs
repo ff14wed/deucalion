@@ -61,7 +61,12 @@ impl State {
 
         let wg = waitgroup::WaitGroup::new();
         let hs = State {
-            recv_hook: recv::Hook::new(broadcast_tx.clone(), deobf_queue_tx, wg.clone())?,
+            recv_hook: recv::Hook::new(
+                broadcast_tx.clone(),
+                deobf_queue_tx,
+                deobf_queue_rx.clone(),
+                wg.clone(),
+            )?,
             send_hook: send::Hook::new(broadcast_tx.clone(), wg.clone())?,
             send_lobby_hook: send_lobby::Hook::new(broadcast_tx.clone(), wg.clone())?,
             create_target_hook: create_target::Hook::new(broadcast_tx, deobf_queue_rx, wg.clone())?,
