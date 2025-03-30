@@ -31,8 +31,12 @@ jobs:
     - name: List Keys
       run: gpg -K
 
+    # For some reason, building deucalion inside its own directory yields
+    # a smaller binary
     - name: Build
       run: |
+        cargo build --release
+        cd deucalion
         cargo build --release
 
     - name: Build bcryptprimitives.rs shim

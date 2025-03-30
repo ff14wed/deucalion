@@ -81,7 +81,7 @@ impl State {
         let sig: &[pattern::Atom] = &pat;
         let ffxiv_file_path = get_ffxiv_filepath()?;
 
-        let image_map = ImageMap::open(&ffxiv_file_path).unwrap();
+        let image_map = ImageMap::open(&ffxiv_file_path)?;
         let pe_image = PeView::from_bytes(image_map.as_ref())?;
 
         let sig_name = match hook_type {

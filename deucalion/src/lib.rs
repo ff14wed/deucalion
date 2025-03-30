@@ -189,14 +189,8 @@ unsafe extern "system" fn main(dll_base_addr: LPVOID) -> u32 {
         println!("Error initializing logger: {e}");
     }
 
-    let result = std::panic::catch_unwind(|| {
-        if let Err(e) = main_with_result() {
-            error!("Encountered fatal error: {e}");
-            pause();
-        }
-    });
-    if let Err(cause) = result {
-        error!("Panic happened: {cause:?}");
+    if let Err(e) = main_with_result() {
+        error!("Encountered fatal error: {e}");
         pause();
     }
     if let Err(e) = drop_ref_count_to_one(dll_base_addr as HMODULE) {

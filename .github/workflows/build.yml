@@ -19,7 +19,12 @@ jobs:
         toolchain: nightly
         override: true
         components: rustfmt, clippy
+    # For some reason, building deucalion inside its own directory yields
+    # a smaller binary
     - name: Build
-      run: cargo build --release
+      run: |
+        cargo build --release
+        cd deucalion
+        cargo build --release
     - name: Build bcryptprimitives.rs shim
       run: rustc shims/bcryptprimitives.rs -Copt-level=3 -Clto=fat --out-dir target/release
