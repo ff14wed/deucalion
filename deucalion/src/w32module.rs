@@ -49,16 +49,19 @@ unsafe fn get_ref_count(hmodule: HMODULE) -> Result<u32> {
         }));
     }
 
-    let mut more_modules: bool = true;
-
-    while more_modules {
+    // Set a hard limit of 65535 modules to iterate through before giving up
+    for _ in 0..65535 {
         if std::ptr::eq(hmodule, me32.hModule) {
             if me32.GlblcntUsage == 0xFFFF {
-                continue;
+                return Err(format_err!(
+                    "Could not get ref count for current module since it is reported as 0xFFFF."
+                ));
             }
             return Ok(me32.GlblcntUsage);
         }
-        more_modules = unsafe { Module32Next(snapshot_handle.0, &mut me32) } > 0;
+        if unsafe { Module32Next(snapshot_handle.0, &mut me32) } == 0 {
+            break;
+        }
     }
     Err(format_err!("Could not find ref count for current module"))
 }
