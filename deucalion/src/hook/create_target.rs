@@ -92,9 +92,9 @@ impl CustomDetour {
         Ok(())
     }
 
-    /// Calls the trampoline for the function being hooked. Ensure the signature
-    /// of this function matches the signature of the function being hooked.
-    unsafe fn call_trampoline(&self, source_actor: usize) -> Result<usize> {
+    /// Calls the trampoline for the function being hooked. Tries to preserve
+    /// rsi for any downstream consumers.
+    unsafe fn call_trampoline(&self, source_actor: usize, packet_data: usize) -> Result<usize> {
         let trampoline: fn(usize) -> usize = unsafe {
             mem::transmute(
                 self.detour
@@ -104,13 +104,28 @@ impl CustomDetour {
                     .trampoline(),
             )
         };
-        Ok(trampoline(source_actor))
+        // Custom calling convention for the trampoline: Pass in rcx and rsi
+        let result: usize;
+        unsafe {
+            asm!("
+                mov rsi, {0}
+                mov rcx, {1}
+                call {2}",
+                in(reg) packet_data,
+                in(reg) source_actor,
+                in(reg) trampoline as usize,
+                out("rsi") _,
+                out("rcx") _,
+                out("rax") result,
+            );
+        }
+        Ok(result)
     }
 
     /// Helper for calling the trampoline with error handling.
-    unsafe fn call_original(&self, source_actor: usize) -> usize {
+    unsafe fn call_original(&self, source_actor: usize, packet_data: usize) -> usize {
         unsafe {
-            self.call_trampoline(source_actor).unwrap_or_else(|e| {
+            self.call_trampoline(source_actor, packet_data).unwrap_or_else(|e| {
                 error!("{e}");
                 0
             })
@@ -234,7 +249,7 @@ impl Hook {
         // function
         unsafe {
             if parent_ptr.offset_from(return_addr).abs() > 0x2000 {
-                return DETOUR.call_original(source_actor);
+                return DETOUR.call_original(source_actor, packet_data as usize);
             }
         }
         if unsafe { *(packet_data.byte_offset(4) as *const u16) } != DEUCALION_DEFER_IPC {
@@ -244,7 +259,7 @@ impl Hook {
                 "Packet {opcode} unaccounted for. \
                 This is not necessarily a problem unless it happens too much."
             );
-            return unsafe { DETOUR.call_original(source_actor) };
+            return unsafe { DETOUR.call_original(source_actor, packet_data as usize) };
         }
 
         let mut packet_sent = false;
@@ -282,7 +297,7 @@ impl Hook {
             warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
         }
 
-        unsafe { DETOUR.call_original(source_actor) }
+        unsafe { DETOUR.call_original(source_actor, packet_data as usize) }
     }
 
     pub fn shutdown() {
