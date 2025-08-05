@@ -1,10 +1,4 @@
-use std::{
-    io,
-    mem::MaybeUninit,
-    os::windows::prelude::{AsRawHandle, FromRawHandle, OwnedHandle},
-    path::Path,
-    ptr,
-};
+use std::{io, mem::MaybeUninit, path::Path, ptr};
 
 use anyhow::{Result, format_err};
 use dll_syringe::{
@@ -129,13 +123,11 @@ pub fn copy_current_process_dacl_to_target(target_pid: usize) -> Result<()> {
         return Err(io::Error::last_os_error().into());
     }
 
-    let owned_handle = unsafe { OwnedHandle::from_raw_handle(handle) };
-
     debug!("Setting the security info for the target process");
 
     let ret = unsafe {
         SetSecurityInfo(
-            owned_handle.as_raw_handle(),
+            handle,
             SE_KERNEL_OBJECT,
             DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
             ptr::null_mut(),

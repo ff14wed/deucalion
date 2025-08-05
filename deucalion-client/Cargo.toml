@@ -12,14 +12,18 @@ readme = "README.md"
 keywords = ["ffxiv", "windows", "dll-injection", "dll"]
 
 [dependencies]
-dll-syringe = { git = "https://github.com/fry/dll-syringe", rev = "0a8b18e" }
+dll-syringe = "0.17"
 deucalion = { path = "../deucalion" }
 tokio = { version = "1.44.1", features = ["io-util", "sync", "rt"] }
 tokio-util = { version = "0.7.14", features = ["codec", "compat"] }
 tokio-retry = "0.3"
 futures = "0.3"
 sysinfo = "0.34"
-winapi = { version = "0.3", features = ["aclapi", "processthreadsapi"] }
+winapi = { version = "0.3", features = [
+    "aclapi",
+    "processthreadsapi",
+    "securitybaseapi",
+] }
 anyhow = "1.0"
 log = "0.4"
 simplelog = "0.12"
