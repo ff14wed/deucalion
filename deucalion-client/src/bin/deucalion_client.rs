@@ -1,6 +1,8 @@
 use anyhow::{Result, format_err};
 use clap::Parser;
+use deucalion::rpc::MessageOps;
 use deucalion_client::{
+    packet::print_deucalion_segment,
     process,
     subscriber::{BroadcastFilter, Subscriber},
 };
@@ -87,10 +89,17 @@ fn main() -> Result<()> {
                 &pipe_name,
                 BroadcastFilter::AllowZoneRecv as u32 | BroadcastFilter::AllowZoneSend as u32,
                 move |payload: deucalion::rpc::Payload| {
-                    println!(
-                        "OP {:?}, CTX {}, DATA {:?}",
-                        payload.op, payload.ctx, payload.data
-                    );
+                    info!("Received payload: {:?} {}", payload.op, payload.ctx);
+                    match payload.op {
+                        MessageOps::Recv | MessageOps::Send => {
+                            if let Err(e) = print_deucalion_segment(&payload.data) {
+                                error!("Failed to print Deucalion segment: {e}");
+                            }
+                        }
+                        _ => {
+                            info!("Data: {:X?}", payload.data);
+                        }
+                    }
                     Ok(())
                 },
             )
