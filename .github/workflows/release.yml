@@ -40,17 +40,6 @@ jobs:
     - name: Build bcryptprimitives.rs shim
       run: rustc shims/bcryptprimitives.rs -Copt-level=3 -Clto=fat --out-dir target/release
 
-    - name: Code Sign
-      uses: dlemstra/code-sign-action@v1
-      with:
-        certificate: '${{ secrets.CODE_SIGN_CERTIFICATE }}'
-        password: '${{ secrets.CODE_SIGN_PASSWORD }}'
-        recursive: false
-        files: |
-          target/release/deucalion.dll
-          target/release/deucalion_client.exe
-          target/release/bcryptprimitives.dll
-
     - name: Deucalion SHA256Sum and GPG Sign
       run: |
         sha256sum target/release/deucalion.dll > deucalion.sha256sum
