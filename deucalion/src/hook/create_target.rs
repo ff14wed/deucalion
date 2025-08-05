@@ -33,9 +33,9 @@ static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
 /// Implementation mostly borrowed from retour::StaticDetour.
 /// Copyright (C) 2017 Elliott Linder.
 pub struct CustomDetour {
-    // Closure arguments: (packet_data, return_addr, a1)
+    /// Closure arguments: (packet_data, original_data, return_addr, source_actor)
     #[allow(clippy::type_complexity)]
-    closure: AtomicPtr<Box<dyn Fn(usize, usize, usize) -> usize>>,
+    closure: AtomicPtr<Box<dyn Fn(usize, usize, usize, usize) -> usize>>,
     detour: AtomicPtr<RawDetour>,
 }
 
@@ -51,7 +51,7 @@ impl CustomDetour {
     /// is enabled.
     pub unsafe fn initialize<D>(&self, target: *const (), closure: D) -> Result<()>
     where
-        D: Fn(usize, usize, usize) -> usize + Send + 'static,
+        D: Fn(usize, usize, usize, usize) -> usize + Send + 'static,
     {
         let mut detour = unsafe { Box::new(RawDetour::new(target, create_target as *const ())?) };
         self.detour
@@ -136,13 +136,19 @@ impl CustomDetour {
     unsafe fn call_closure(
         &self,
         packet_data: usize,
+        original_data: usize,
         return_addr: usize,
         source_actor: usize,
     ) -> Result<usize> {
         let closure = unsafe {
             self.closure.load(Ordering::SeqCst).as_ref().ok_or(HookError::NotInitialized)?
         };
-        Ok(closure(packet_data, return_addr, source_actor))
+        Ok(closure(
+            packet_data,
+            original_data,
+            return_addr,
+            source_actor,
+        ))
     }
 }
 
@@ -171,18 +177,26 @@ unsafe extern "system" fn create_target(a1: usize) -> usize {
     unsafe {
         let source_actor: usize;
         let packet_data: *const u8;
+        let original_data: *const u8;
         asm!("
-            # Ensure rdi is preserved before this section
-            mov r14, {0}
-            mov {1}, rdi",
+            # Ensure rdi and r12 are preserved before this section
+            mov r15, {0}
+            mov {1}, rdi
+            mov {2}, r12",
             in(reg) a1,
             out(reg) packet_data,
-            out("r14") source_actor);
+            out(reg) original_data,
+            out("r15") source_actor);
 
         let return_addr = return_address(0);
 
         DETOUR
-            .call_closure(packet_data as usize, return_addr as usize, source_actor)
+            .call_closure(
+                packet_data as usize,
+                original_data as usize,
+                return_addr as usize,
+                source_actor,
+            )
             .unwrap_or_else(|e| {
                 error!("Error in CreateTarget closure: {e}");
                 0
@@ -225,8 +239,8 @@ impl Hook {
 
         let self_clone = self.clone();
         unsafe {
-            DETOUR.initialize(fn_ptr as *const (), move |a, b, c| {
-                self_clone.hook_handler(a, b, c)
+            DETOUR.initialize(fn_ptr as *const (), move |a, b, c, d| {
+                self_clone.hook_handler(a, b, c, d)
             })?;
             DETOUR.enable()?;
         }
@@ -237,11 +251,11 @@ impl Hook {
     unsafe fn hook_handler(
         &self,
         packet_data: usize,
+        original_data: usize,
         return_addr: usize,
         source_actor: usize,
     ) -> usize {
         let _guard = self.wg.add();
-        let packet_data = packet_data as *mut u8;
         let return_addr = return_addr as *const u8;
         let parent_ptr = self.parent_ptr.load(Ordering::SeqCst) as *const u8;
 
@@ -249,18 +263,17 @@ impl Hook {
         // function
         unsafe {
             if parent_ptr.offset_from(return_addr).abs() > 0x2000 {
-                return DETOUR.call_original(source_actor, packet_data as usize);
+                return DETOUR.call_original(source_actor, packet_data);
             }
         }
-        if unsafe { *(packet_data.byte_offset(4) as *const u16) } != DEUCALION_DEFER_IPC {
-            // This packet is unaccounted for in the packet queue, so return.
-            let opcode: u16 = unsafe { *(packet_data.byte_offset(2) as *const u16) };
-            warn!(
-                "Packet {opcode} unaccounted for. \
-                This is not necessarily a problem unless it happens too much."
-            );
-            return unsafe { DETOUR.call_original(source_actor, packet_data as usize) };
-        }
+
+        let mut actual_packet_data = packet_data as *mut u8;
+        if unsafe { *(actual_packet_data.byte_offset(4) as *const u16) } != DEUCALION_DEFER_IPC {
+            // Could not read the packet data normally, so just use the original
+            // packet data. We should be guarded against invalid data being
+            // sent out since there is an opcode and a source actor check.
+            actual_packet_data = original_data as *mut u8
+        };
 
         let mut packet_sent = false;
         for expected_packet in self.deobf_queue_rx.try_iter() {
@@ -268,7 +281,7 @@ impl Hook {
                 packet::reconstruct_deobfuscated_packet(
                     expected_packet,
                     source_actor as u32,
-                    packet_data,
+                    actual_packet_data,
                 )
             } {
                 Ok(packet::Packet::Ipc(data)) => {
@@ -293,11 +306,11 @@ impl Hook {
             // If we went through the entire queue (or if it's empty)
             // without sending a matching, corresponding packet, then
             // give up.
-            let opcode: u16 = unsafe { *(packet_data.byte_offset(2) as *const u16) };
+            let opcode: u16 = unsafe { *(actual_packet_data.byte_offset(2) as *const u16) };
             warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
         }
 
-        unsafe { DETOUR.call_original(source_actor, packet_data as usize) }
+        unsafe { DETOUR.call_original(source_actor, packet_data) }
     }
 
     pub fn shutdown() {
