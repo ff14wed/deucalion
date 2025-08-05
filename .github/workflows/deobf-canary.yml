@@ -27,9 +27,9 @@ jobs:
     - name: Test
       shell: bash
       run: |
-        if grep "# Ensure r12" "target/release/deps/deucalion.s" -B 20 \
+        if grep "# Ensure rdi" "target/release/deps/deucalion.s" -B 20 \
          | grep ".seh_endprologue" -A 10 \
-         | grep -q "movq.*, %r12$"; then
-          echo "Something found using r12 as a destination register"
+         | grep -q "movq.*, %rdi$"; then
+          echo "Something found using rdi as a destination register"
           exit 1
         fi
