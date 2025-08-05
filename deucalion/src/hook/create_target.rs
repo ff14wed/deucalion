@@ -93,7 +93,7 @@ impl CustomDetour {
     }
 
     /// Calls the trampoline for the function being hooked. Tries to preserve
-    /// rsi for any downstream consumers.
+    /// r12 for any downstream consumers.
     unsafe fn call_trampoline(&self, source_actor: usize, packet_data: usize) -> Result<usize> {
         let trampoline: fn(usize) -> usize = unsafe {
             mem::transmute(
@@ -104,17 +104,17 @@ impl CustomDetour {
                     .trampoline(),
             )
         };
-        // Custom calling convention for the trampoline: Pass in rcx and rsi
+        // Custom calling convention for the trampoline: Pass in rcx and r12
         let result: usize;
         unsafe {
             asm!("
-                mov rsi, {0}
+                mov r12, {0}
                 mov rcx, {1}
                 call {2}",
                 in(reg) packet_data,
                 in(reg) source_actor,
                 in(reg) trampoline as usize,
-                out("rsi") _,
+                out("r12") _,
                 out("rcx") _,
                 out("rax") result,
             );
@@ -172,9 +172,9 @@ unsafe extern "system" fn create_target(a1: usize) -> usize {
         let source_actor: usize;
         let packet_data: *const u8;
         asm!("
-            # Ensure rsi is preserved before here
+            # Ensure r12 is preserved before this section
             mov r14, {0}
-            mov {1}, rsi",
+            mov {1}, r12",
             in(reg) a1,
             out(reg) packet_data,
             out("r14") source_actor);
