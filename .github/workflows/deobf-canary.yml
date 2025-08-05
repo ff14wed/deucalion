@@ -29,7 +29,7 @@ jobs:
       run: |
         if grep "# Ensure rdi" "target/release/deps/deucalion.s" -B 20 \
          | grep ".seh_endprologue" -A 10 \
-         | grep -q "movq.*, %rdi$"; then
-          echo "Something found using rdi as a destination register"
+         | grep -Eq "movq.*, %(rdi|r12)$"; then
+          echo "Something found using rdi or r12 as a destination register"
           exit 1
         fi
