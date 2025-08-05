@@ -13,6 +13,15 @@ Example usage:
 cargo run --bin find_sig_matches "C:\path\to\file.exe" "E8 $ { ' } ? ? ? ?"
 ```
 
+## validate_sigs
+
+Validates that the signatures used in Deucalion work for the target exe.
+
+Example usage:
+```bash
+cargo run --bin validate_sigs "C:\path\to\file.exe"
+```
+
 ## signal_exit
 
 Given a process ID, signals Deucalion to exit if it is running in the target
