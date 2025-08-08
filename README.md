@@ -28,7 +28,8 @@ The following is the compatibility matrix for Deucalion:
 | 6.x           | 0.9.x             |
 | 7.0-7.1x      | 1.1.x             |
 | 7.2x          | 1.2.x             |
-| 7.3x          | 1.3.1+            |
+| 7.3           | 1.3.1             |
+| 7.3 hotfix    | 1.3.2             |
 
 
 ## Features
