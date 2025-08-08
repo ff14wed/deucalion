@@ -179,14 +179,14 @@ unsafe extern "system" fn create_target(a1: usize) -> usize {
         let packet_data: *const u8;
         let original_data: *const u8;
         asm!("
-            # Ensure rdi and r12 are preserved before this section
-            mov r15, {0}
+            # Ensure rdi and r13 are preserved before this section
+            mov r14, {0}
             mov {1}, rdi
-            mov {2}, r12",
+            mov {2}, r13",
             in(reg) a1,
             out(reg) packet_data,
             out(reg) original_data,
-            out("r15") source_actor);
+            out("r14") source_actor);
 
         let return_addr = return_address(0);
 
