@@ -38,7 +38,7 @@ pub const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
 /// Overriding with a custom signature for create_target is not supported. If
 /// this has changed, it is likely that the hook is broken in a way that just
 /// a signature change won't fix.
-pub const CREATE_TARGET_SIG: &str = "E8 $ { ' } 41 83 C7 ? 49 8B FD";
+pub const CREATE_TARGET_SIG: &str = "E8 $ { ' } 41 83 C5 ? 49 8B FC";
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     let hook_type = match payload.op {
