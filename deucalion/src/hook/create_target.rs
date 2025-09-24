@@ -24,7 +24,7 @@ use crate::{procloader::get_ffxiv_handle, rpc};
 
 // Once initialized, it's important to keep this in memory so that any
 // stray calls to the hook still have a valid trampoline to call.
-static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
+pub(super) static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
 
 /// Custom static detour designed specifically for CreateTarget. If the
 /// signature of the function being hooked changes non-trivially this will
@@ -180,13 +180,13 @@ unsafe extern "system" fn create_target(a1: usize) -> usize {
         let original_data: *const u8;
         asm!("
             # Ensure rdi and r13 are preserved before this section
-            mov r15, {0}
+            mov r10, {0}
             mov {1}, rdi
             mov {2}, r12",
             in(reg) a1,
             out(reg) packet_data,
             out(reg) original_data,
-            out("r15") source_actor);
+            out("r10") source_actor);
 
         let return_addr = return_address(0);
 
@@ -316,6 +316,101 @@ impl Hook {
     pub fn shutdown() {
         if let Err(e) = unsafe { DETOUR.disable() } {
             error!("Error disabling CreateTarget hook: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::arch::asm;
+
+    use crate::hook::create_target::DETOUR;
+
+    const FAKE_PACKET_PTR: usize = 0x12345678;
+    const FAKE_ORIGINAL_PTR: usize = 0x12000000;
+    const FAKE_SOURCE_ACTOR: u32 = 0x11110000;
+    const FAKE_OPCODE: u32 = 0x420;
+
+    fn dummy_create_target(a1: u32) -> u32 {
+        let source_actor: u32;
+        let packet_data: usize;
+        let original_data: usize;
+        unsafe {
+            asm!(
+                "mov {1:e}, {0:e}",
+                "mov {2}, rdi",
+                "mov {3}, r12",
+                in(reg) a1,
+                out(reg) source_actor,
+                out(reg) packet_data,
+                out(reg) original_data,
+            );
+        }
+
+        source_actor + packet_data as u32 + original_data as u32
+    }
+
+    unsafe extern "system" fn parent_fn() {
+        let packet_data: usize;
+        let original_data: usize;
+        let dummy_result: u32;
+        let case: u32;
+
+        unsafe {
+            asm!(
+                "mov r12, {orig_ptr}",
+                "mov rdi, {packet_ptr}",
+                "mov r14d, {source_actor}",
+                "mov r13d, {opcode}",
+                "mov edx, r13d",
+                "mov ecx, r14d",
+                "call {func}",
+                "add r13d, 0xFFFFFF9Bh",
+                orig_ptr = const FAKE_ORIGINAL_PTR,
+                packet_ptr = const FAKE_PACKET_PTR,
+                source_actor = const FAKE_SOURCE_ACTOR,
+                opcode = const FAKE_OPCODE,
+                func = sym dummy_create_target,
+                out("rax") dummy_result,
+                out("rdi") packet_data,
+                out("r12") original_data,
+                out("r13d") case,
+            );
+        }
+
+        assert_eq!(packet_data, FAKE_PACKET_PTR);
+        assert_eq!(original_data, FAKE_ORIGINAL_PTR);
+        assert_eq!(case, FAKE_OPCODE - 101);
+        assert_eq!(
+            dummy_result,
+            FAKE_SOURCE_ACTOR + FAKE_PACKET_PTR as u32 + FAKE_ORIGINAL_PTR as u32
+        );
+    }
+
+    #[test]
+    fn test_parent_fn() {
+        unsafe { parent_fn() };
+    }
+
+    #[test]
+    fn test_custom_detour() {
+        unsafe {
+            DETOUR
+                .initialize(
+                    dummy_create_target as *const (),
+                    |packet_data, original_data, return_addr, source_actor| {
+                        println!("In detour with {packet_data:x}, {original_data:x}, {return_addr:x}, {source_actor:x}");
+                        assert_eq!(packet_data, FAKE_PACKET_PTR);
+                        assert_eq!(original_data, FAKE_ORIGINAL_PTR);
+                        assert!(return_addr != 0);
+                        assert_eq!(source_actor, FAKE_SOURCE_ACTOR as usize);
+                        DETOUR.call_original(source_actor, packet_data)
+                    },
+                )
+                .unwrap();
+            DETOUR.enable().unwrap();
+            parent_fn();
+            DETOUR.disable().unwrap();
         }
     }
 }
