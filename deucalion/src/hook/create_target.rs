@@ -26,6 +26,9 @@ use crate::{procloader::get_ffxiv_handle, rpc};
 // stray calls to the hook still have a valid trampoline to call.
 pub(super) static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
 
+/// Non-volatile registers that need to be preserved across the detour call.
+type Nonvolatiles = [usize; 7];
+
 /// Custom static detour designed specifically for CreateTarget. If the
 /// signature of the function being hooked changes non-trivially this will
 /// need to be updated.
@@ -33,9 +36,9 @@ pub(super) static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::n
 /// Implementation mostly borrowed from retour::StaticDetour.
 /// Copyright (C) 2017 Elliott Linder.
 pub struct CustomDetour {
-    /// Closure arguments: (packet_data, original_data, return_addr, source_actor)
+    /// Closure arguments: (source_actor, return_addr, nonvolatile_regs)
     #[allow(clippy::type_complexity)]
-    closure: AtomicPtr<Box<dyn Fn(usize, usize, usize, usize) -> usize>>,
+    closure: AtomicPtr<Box<dyn Fn(usize, usize, &Nonvolatiles) -> usize>>,
     detour: AtomicPtr<RawDetour>,
 }
 
@@ -51,7 +54,7 @@ impl CustomDetour {
     /// is enabled.
     pub unsafe fn initialize<D>(&self, target: *const (), closure: D) -> Result<()>
     where
-        D: Fn(usize, usize, usize, usize) -> usize + Send + 'static,
+        D: Fn(usize, usize, &Nonvolatiles) -> usize + Send + 'static,
     {
         let mut detour = unsafe { Box::new(RawDetour::new(target, create_target as *const ())?) };
         self.detour
@@ -93,8 +96,12 @@ impl CustomDetour {
     }
 
     /// Calls the trampoline for the function being hooked. Tries to preserve
-    /// rdi for any downstream consumers.
-    unsafe fn call_trampoline(&self, source_actor: usize, packet_data: usize) -> Result<usize> {
+    /// non-volatile registers for any downstream consumers.
+    unsafe fn call_trampoline(
+        &self,
+        source_actor: usize,
+        nonvolatile_regs: &Nonvolatiles,
+    ) -> Result<usize> {
         let trampoline: fn(usize) -> usize = unsafe {
             mem::transmute(
                 self.detour
@@ -104,28 +111,35 @@ impl CustomDetour {
                     .trampoline(),
             )
         };
-        // Custom calling convention for the trampoline: Pass in rcx and rdi
+        // Custom calling convention for the trampoline: Pass in nonvolatile
+        // registers in addition to rcx.
         let result: usize;
         unsafe {
-            asm!("
-                mov rdi, {0}
-                mov rcx, {1}
-                call {2}",
-                in(reg) packet_data,
-                in(reg) source_actor,
-                in(reg) trampoline as usize,
-                out("rdi") _,
-                out("rcx") _,
-                out("rax") result,
+            asm!(
+                "# Preserve all non-volatile registers before calling the trampoline",
+                "push rbx", "push rdi", "push rsi", "push r12", "push r13", "push r14", "push r15",
+                "mov rbx, qword ptr [r10]",
+                "mov rdi, qword ptr [r10+8]",
+                "mov rsi, qword ptr [r10+16]",
+                "mov r12, qword ptr [r10+24]",
+                "mov r13, qword ptr [r10+32]",
+                "mov r14, qword ptr [r10+40]",
+                "mov r15, qword ptr [r10+48]",
+                "call rax",
+                "pop r15", "pop r14", "pop r13", "pop r12", "pop rsi", "pop rdi", "pop rbx",
+                in("rax") trampoline as usize,
+                in("rcx") source_actor,
+                in("r10") nonvolatile_regs.as_ptr(),
+                lateout("rax") result,
             );
         }
         Ok(result)
     }
 
     /// Helper for calling the trampoline with error handling.
-    unsafe fn call_original(&self, source_actor: usize, packet_data: usize) -> usize {
+    unsafe fn call_original(&self, source_actor: usize, nonvolatile_regs: &Nonvolatiles) -> usize {
         unsafe {
-            self.call_trampoline(source_actor, packet_data).unwrap_or_else(|e| {
+            self.call_trampoline(source_actor, nonvolatile_regs).unwrap_or_else(|e| {
                 error!("{e}");
                 0
             })
@@ -135,20 +149,14 @@ impl CustomDetour {
     /// Calls the closure that was set for the detour.
     unsafe fn call_closure(
         &self,
-        packet_data: usize,
-        original_data: usize,
-        return_addr: usize,
         source_actor: usize,
+        return_addr: usize,
+        nonvolatile_regs: &Nonvolatiles,
     ) -> Result<usize> {
         let closure = unsafe {
             self.closure.load(Ordering::SeqCst).as_ref().ok_or(HookError::NotInitialized)?
         };
-        Ok(closure(
-            packet_data,
-            original_data,
-            return_addr,
-            source_actor,
-        ))
+        Ok(closure(source_actor, return_addr, nonvolatile_regs))
     }
 }
 
@@ -174,29 +182,27 @@ unsafe extern "C" {
 }
 
 unsafe extern "system" fn create_target(a1: usize) -> usize {
+    let mut source_actor = a1;
+
     unsafe {
-        let source_actor: usize;
-        let packet_data: *const u8;
-        let original_data: *const u8;
-        asm!("
-            # Ensure rdi and r13 are preserved before this section
-            mov r10, {0}
-            mov {1}, rdi
-            mov {2}, r12",
-            in(reg) a1,
-            out(reg) packet_data,
-            out(reg) original_data,
-            out("r10") source_actor);
+        let mut nonvolatile_regs = [0; 7];
+        asm!(
+            "# Ensure non-volatile registers are preserved before this section",
+            "mov qword ptr [rax], rbx",
+            "mov qword ptr [rax+8], rdi",
+            "mov qword ptr [rax+16], rsi",
+            "mov qword ptr [rax+24], r12",
+            "mov qword ptr [rax+32], r13",
+            "mov qword ptr [rax+40], r14",
+            "mov qword ptr [rax+48], r15",
+            in("rax") nonvolatile_regs.as_mut_ptr(),
+            inout("rcx") source_actor,
+        );
 
         let return_addr = return_address(0);
 
         DETOUR
-            .call_closure(
-                packet_data as usize,
-                original_data as usize,
-                return_addr as usize,
-                source_actor,
-            )
+            .call_closure(source_actor, return_addr as usize, &nonvolatile_regs)
             .unwrap_or_else(|e| {
                 error!("Error in CreateTarget closure: {e}");
                 0
@@ -239,8 +245,8 @@ impl Hook {
 
         let self_clone = self.clone();
         unsafe {
-            DETOUR.initialize(fn_ptr as *const (), move |a, b, c, d| {
-                self_clone.hook_handler(a, b, c, d)
+            DETOUR.initialize(fn_ptr as *const (), move |a, b, c| {
+                self_clone.hook_handler(a, b, c)
             })?;
             DETOUR.enable()?;
         }
@@ -250,11 +256,12 @@ impl Hook {
 
     unsafe fn hook_handler(
         &self,
-        packet_data: usize,
-        original_data: usize,
-        return_addr: usize,
         source_actor: usize,
+        return_addr: usize,
+        nonvolatile_regs: &Nonvolatiles,
     ) -> usize {
+        let packet_data = nonvolatile_regs[1]; // rdi
+        let original_data = nonvolatile_regs[3]; // r12
         let _guard = self.wg.add();
         let return_addr = return_addr as *const u8;
         let parent_ptr = self.parent_ptr.load(Ordering::SeqCst) as *const u8;
@@ -263,7 +270,7 @@ impl Hook {
         // function
         unsafe {
             if parent_ptr.offset_from(return_addr).abs() > 0x2000 {
-                return DETOUR.call_original(source_actor, packet_data);
+                return DETOUR.call_original(source_actor, nonvolatile_regs);
             }
         }
 
@@ -310,7 +317,7 @@ impl Hook {
             warn!("Processing deobfuscated packet {opcode}, but no packet was expected");
         }
 
-        unsafe { DETOUR.call_original(source_actor, packet_data) }
+        unsafe { DETOUR.call_original(source_actor, nonvolatile_regs) }
     }
 
     pub fn shutdown() {
@@ -331,6 +338,7 @@ mod tests {
     const FAKE_SOURCE_ACTOR: u32 = 0x11110000;
     const FAKE_OPCODE: u32 = 0x420;
 
+    #[inline(never)]
     fn dummy_create_target(a1: u32) -> u32 {
         let source_actor: u32;
         let packet_data: usize;
@@ -350,6 +358,7 @@ mod tests {
         source_actor + packet_data as u32 + original_data as u32
     }
 
+    #[inline(never)]
     unsafe extern "system" fn parent_fn() {
         let packet_data: usize;
         let original_data: usize;
@@ -377,7 +386,6 @@ mod tests {
                 out("r13d") case,
             );
         }
-
         assert_eq!(packet_data, FAKE_PACKET_PTR);
         assert_eq!(original_data, FAKE_ORIGINAL_PTR);
         assert_eq!(case, FAKE_OPCODE - 101);
@@ -398,13 +406,15 @@ mod tests {
             DETOUR
                 .initialize(
                     dummy_create_target as *const (),
-                    |packet_data, original_data, return_addr, source_actor| {
-                        println!("In detour with {packet_data:x}, {original_data:x}, {return_addr:x}, {source_actor:x}");
+                    |source_actor, return_addr, nonvolatile_regs| {
+                        let packet_data = nonvolatile_regs[1]; // rdi
+                        let original_data = nonvolatile_regs[3]; // r12
+
                         assert_eq!(packet_data, FAKE_PACKET_PTR);
                         assert_eq!(original_data, FAKE_ORIGINAL_PTR);
                         assert!(return_addr != 0);
                         assert_eq!(source_actor, FAKE_SOURCE_ACTOR as usize);
-                        DETOUR.call_original(source_actor, packet_data)
+                        DETOUR.call_original(source_actor, nonvolatile_regs)
                     },
                 )
                 .unwrap();
