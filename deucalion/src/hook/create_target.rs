@@ -24,7 +24,7 @@ use crate::{procloader::get_ffxiv_handle, rpc};
 
 // Once initialized, it's important to keep this in memory so that any
 // stray calls to the hook still have a valid trampoline to call.
-pub(super) static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
+static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
 
 /// Non-volatile registers that need to be preserved across the detour call.
 type Nonvolatiles = [usize; 7];
@@ -158,10 +158,8 @@ impl CustomDetour {
         };
         Ok(closure(source_actor, return_addr, nonvolatile_regs))
     }
-}
 
-impl Drop for CustomDetour {
-    fn drop(&mut self) {
+    fn drop_internal(&self) {
         let previous = self.closure.swap(std::ptr::null_mut(), Ordering::Relaxed);
         if !previous.is_null() {
             mem::drop(unsafe { Box::from_raw(previous) });
@@ -176,14 +174,18 @@ impl Drop for CustomDetour {
     }
 }
 
+impl Drop for CustomDetour {
+    fn drop(&mut self) {
+        self.drop_internal();
+    }
+}
+
 unsafe extern "C" {
     #[link_name = "llvm.returnaddress"]
     unsafe fn return_address(a: i32) -> *const u8;
 }
 
-unsafe extern "system" fn create_target(a1: usize) -> usize {
-    let mut source_actor = a1;
-
+unsafe extern "system" fn create_target(mut source_actor: usize) -> usize {
     unsafe {
         let mut nonvolatile_regs = [0; 7];
         asm!(
@@ -331,7 +333,7 @@ impl Hook {
 mod tests {
     use std::arch::asm;
 
-    use crate::hook::create_target::DETOUR;
+    use crate::hook::create_target::{DETOUR, Nonvolatiles};
 
     const FAKE_PACKET_PTR: usize = 0x12345678;
     const FAKE_ORIGINAL_PTR: usize = 0x12000000;
@@ -339,19 +341,59 @@ mod tests {
     const FAKE_OPCODE: u32 = 0x420;
 
     #[inline(never)]
-    fn dummy_create_target(a1: u32) -> u32 {
-        let source_actor: u32;
+    fn create_target_72x(mut source_actor: u32) -> u32 {
+        let packet_data: usize;
+        unsafe {
+            asm!(
+                "mov {0}, rsi",
+                out(reg) packet_data,
+                inout("rcx") source_actor,
+            );
+        }
+
+        source_actor + packet_data as u32
+    }
+
+    #[inline(never)]
+    unsafe extern "system" fn parent_72x() {
+        let packet_data: usize;
+        let dummy_result: u32;
+        let case: u32;
+
+        unsafe {
+            asm!(
+                "mov rsi, {packet_ptr}",
+                "mov edi, {source_actor}",
+                "mov r15d, {opcode}",
+                "mov edx, r15d",
+                "mov ecx, edi",
+                "call {func}",
+                "add r15d, 0xFFFFFF9Ah",
+                packet_ptr = const FAKE_PACKET_PTR,
+                source_actor = const FAKE_SOURCE_ACTOR,
+                opcode = const FAKE_OPCODE,
+                func = sym create_target_72x,
+                out("rax") dummy_result,
+                out("rsi") packet_data,
+                out("r15d") case,
+            );
+        }
+        assert_eq!(packet_data, FAKE_PACKET_PTR);
+        assert_eq!(case, FAKE_OPCODE - 102);
+        assert_eq!(dummy_result, FAKE_SOURCE_ACTOR + FAKE_PACKET_PTR as u32);
+    }
+
+    #[inline(never)]
+    fn create_target_731h(mut source_actor: u32) -> u32 {
         let packet_data: usize;
         let original_data: usize;
         unsafe {
             asm!(
-                "mov {1:e}, {0:e}",
-                "mov {2}, rdi",
-                "mov {3}, r12",
-                in(reg) a1,
-                out(reg) source_actor,
+                "mov {0}, rdi",
+                "mov {1}, r12",
                 out(reg) packet_data,
                 out(reg) original_data,
+                inout("rcx") source_actor,
             );
         }
 
@@ -359,7 +401,7 @@ mod tests {
     }
 
     #[inline(never)]
-    unsafe extern "system" fn parent_fn() {
+    unsafe extern "system" fn parent_731h() {
         let packet_data: usize;
         let original_data: usize;
         let dummy_result: u32;
@@ -379,7 +421,7 @@ mod tests {
                 packet_ptr = const FAKE_PACKET_PTR,
                 source_actor = const FAKE_SOURCE_ACTOR,
                 opcode = const FAKE_OPCODE,
-                func = sym dummy_create_target,
+                func = sym create_target_731h,
                 out("rax") dummy_result,
                 out("rdi") packet_data,
                 out("r12") original_data,
@@ -396,31 +438,45 @@ mod tests {
     }
 
     #[test]
-    fn test_parent_fn() {
-        unsafe { parent_fn() };
+    fn test_parent_72x() {
+        unsafe { parent_72x() };
     }
 
     #[test]
-    fn test_custom_detour() {
-        unsafe {
-            DETOUR
-                .initialize(
-                    dummy_create_target as *const (),
-                    |source_actor, return_addr, nonvolatile_regs| {
-                        let packet_data = nonvolatile_regs[1]; // rdi
-                        let original_data = nonvolatile_regs[3]; // r12
+    fn test_parent_731h() {
+        unsafe { parent_731h() };
+    }
 
-                        assert_eq!(packet_data, FAKE_PACKET_PTR);
-                        assert_eq!(original_data, FAKE_ORIGINAL_PTR);
-                        assert!(return_addr != 0);
-                        assert_eq!(source_actor, FAKE_SOURCE_ACTOR as usize);
-                        DETOUR.call_original(source_actor, nonvolatile_regs)
-                    },
-                )
-                .unwrap();
+    fn validate_detour(
+        create_target: fn(u32) -> u32,
+        parent_fn: unsafe extern "system" fn(),
+        nonvolatile_validator: fn(&Nonvolatiles),
+    ) {
+        DETOUR.drop_internal();
+        let closure = move |source_actor, return_addr, nonvolatile_regs: &Nonvolatiles| {
+            nonvolatile_validator(nonvolatile_regs);
+            assert!(return_addr != 0);
+            assert_eq!(source_actor, FAKE_SOURCE_ACTOR as usize);
+            unsafe { DETOUR.call_original(source_actor, nonvolatile_regs) }
+        };
+        unsafe {
+            DETOUR.initialize(create_target as *const (), closure).unwrap();
             DETOUR.enable().unwrap();
             parent_fn();
             DETOUR.disable().unwrap();
         }
+    }
+
+    #[test]
+    fn test_detours() {
+        println!("Testing CreateTarget detour for patch 7.2x");
+        validate_detour(create_target_72x, parent_72x, |nonvolatile_regs| {
+            assert_eq!(nonvolatile_regs[2], FAKE_PACKET_PTR); // rsi
+        });
+        println!("Testing CreateTarget detour for patch 7.31h");
+        validate_detour(create_target_731h, parent_731h, |nonvolatile_regs| {
+            assert_eq!(nonvolatile_regs[1], FAKE_PACKET_PTR); // rdi
+            assert_eq!(nonvolatile_regs[3], FAKE_ORIGINAL_PTR); // r12
+        });
     }
 }
