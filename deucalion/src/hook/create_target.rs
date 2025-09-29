@@ -384,6 +384,60 @@ mod tests {
     }
 
     #[inline(never)]
+    fn create_target_731(mut source_actor: u32) -> u32 {
+        let packet_data: usize;
+        let original_data: usize;
+        unsafe {
+            asm!(
+                "mov {0}, rdi",
+                "mov {1}, r13",
+                out(reg) packet_data,
+                out(reg) original_data,
+                inout("rcx") source_actor,
+            );
+        }
+
+        source_actor + packet_data as u32 + original_data as u32
+    }
+
+    #[inline(never)]
+    unsafe extern "system" fn parent_731() {
+        let packet_data: usize;
+        let original_data: usize;
+        let dummy_result: u32;
+        let case: u32;
+
+        unsafe {
+            asm!(
+                "mov r13, {orig_ptr}",
+                "mov rdi, {packet_ptr}",
+                "mov esi, {source_actor}",
+                "mov r15d, {opcode}",
+                "mov edx, r15d",
+                "mov ecx, esi",
+                "call {func}",
+                "add r15d, 0xFFFFFF9Ah",
+                orig_ptr = const FAKE_ORIGINAL_PTR,
+                packet_ptr = const FAKE_PACKET_PTR,
+                source_actor = const FAKE_SOURCE_ACTOR,
+                opcode = const FAKE_OPCODE,
+                func = sym create_target_731,
+                out("rax") dummy_result,
+                out("rdi") packet_data,
+                out("r13") original_data,
+                out("r15d") case,
+            );
+        }
+        assert_eq!(packet_data, FAKE_PACKET_PTR);
+        assert_eq!(original_data, FAKE_ORIGINAL_PTR);
+        assert_eq!(case, FAKE_OPCODE - 102);
+        assert_eq!(
+            dummy_result,
+            FAKE_SOURCE_ACTOR + FAKE_PACKET_PTR as u32 + FAKE_ORIGINAL_PTR as u32
+        );
+    }
+
+    #[inline(never)]
     fn create_target_731h(mut source_actor: u32) -> u32 {
         let packet_data: usize;
         let original_data: usize;
@@ -443,6 +497,11 @@ mod tests {
     }
 
     #[test]
+    fn test_parent_731() {
+        unsafe { parent_731() };
+    }
+
+    #[test]
     fn test_parent_731h() {
         unsafe { parent_731h() };
     }
@@ -473,6 +532,14 @@ mod tests {
         validate_detour(create_target_72x, parent_72x, |nonvolatile_regs| {
             assert_eq!(nonvolatile_regs[2], FAKE_PACKET_PTR); // rsi
         });
+
+        // The 7.30h case is the same as 7.31
+        println!("Testing CreateTarget detour for patch 7.31");
+        validate_detour(create_target_731, parent_731, |nonvolatile_regs| {
+            assert_eq!(nonvolatile_regs[1], FAKE_PACKET_PTR); // rdi
+            assert_eq!(nonvolatile_regs[4], FAKE_ORIGINAL_PTR); // r13
+        });
+        // The 7.30 case is the same as 7.31h
         println!("Testing CreateTarget detour for patch 7.31h");
         validate_detour(create_target_731h, parent_731h, |nonvolatile_regs| {
             assert_eq!(nonvolatile_regs[1], FAKE_PACKET_PTR); // rdi
