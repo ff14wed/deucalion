@@ -333,7 +333,13 @@ impl Hook {
 mod tests {
     use std::arch::asm;
 
-    use crate::hook::create_target::{DETOUR, Nonvolatiles};
+    use pelite::{pattern, pe::PeView};
+
+    use crate::{
+        CREATE_TARGET_SIG,
+        hook::create_target::{DETOUR, Nonvolatiles},
+        procloader::{find_pattern_matches, get_ffxiv_handle},
+    };
 
     const FAKE_PACKET_PTR: usize = 0x12345678;
     const FAKE_ORIGINAL_PTR: usize = 0x12000000;
@@ -369,6 +375,7 @@ mod tests {
                 "mov ecx, edi",
                 "call {func}",
                 "add r15d, 0xFFFFFF9Ah",
+                "cmp r15d, 381h",
                 packet_ptr = const FAKE_PACKET_PTR,
                 source_actor = const FAKE_SOURCE_ACTOR,
                 opcode = const FAKE_OPCODE,
@@ -403,7 +410,6 @@ mod tests {
     #[inline(never)]
     unsafe extern "system" fn parent_731() {
         let packet_data: usize;
-        let original_data: usize;
         let dummy_result: u32;
         let case: u32;
 
@@ -417,6 +423,8 @@ mod tests {
                 "mov ecx, esi",
                 "call {func}",
                 "add r15d, 0xFFFFFF9Ah",
+                "mov rdi, r13",
+                "cmp r15d, 380h",
                 orig_ptr = const FAKE_ORIGINAL_PTR,
                 packet_ptr = const FAKE_PACKET_PTR,
                 source_actor = const FAKE_SOURCE_ACTOR,
@@ -424,12 +432,11 @@ mod tests {
                 func = sym create_target_731,
                 out("rax") dummy_result,
                 out("rdi") packet_data,
-                out("r13") original_data,
                 out("r15d") case,
             );
         }
-        assert_eq!(packet_data, FAKE_PACKET_PTR);
-        assert_eq!(original_data, FAKE_ORIGINAL_PTR);
+        // Packet ptr was overwritten with the original packet ptr in this case
+        assert_eq!(packet_data, FAKE_ORIGINAL_PTR);
         assert_eq!(case, FAKE_OPCODE - 102);
         assert_eq!(
             dummy_result,
@@ -457,7 +464,6 @@ mod tests {
     #[inline(never)]
     unsafe extern "system" fn parent_731h() {
         let packet_data: usize;
-        let original_data: usize;
         let dummy_result: u32;
         let case: u32;
 
@@ -471,6 +477,8 @@ mod tests {
                 "mov ecx, r14d",
                 "call {func}",
                 "add r13d, 0xFFFFFF9Bh",
+                "mov rdi, r12",
+                "cmp r13d, 380h",
                 orig_ptr = const FAKE_ORIGINAL_PTR,
                 packet_ptr = const FAKE_PACKET_PTR,
                 source_actor = const FAKE_SOURCE_ACTOR,
@@ -478,12 +486,11 @@ mod tests {
                 func = sym create_target_731h,
                 out("rax") dummy_result,
                 out("rdi") packet_data,
-                out("r12") original_data,
                 out("r13d") case,
             );
         }
-        assert_eq!(packet_data, FAKE_PACKET_PTR);
-        assert_eq!(original_data, FAKE_ORIGINAL_PTR);
+        // Packet ptr was overwritten with the original packet ptr in this case
+        assert_eq!(packet_data, FAKE_ORIGINAL_PTR);
         assert_eq!(case, FAKE_OPCODE - 101);
         assert_eq!(
             dummy_result,
@@ -504,6 +511,27 @@ mod tests {
     #[test]
     fn test_parent_731h() {
         unsafe { parent_731h() };
+    }
+
+    #[test]
+    fn test_create_target_sig() {
+        // It's not actually FFXIV, but it should work in test
+        let current_handle = get_ffxiv_handle().unwrap();
+        let pe_image = unsafe { PeView::module(current_handle) };
+        let pat = pattern::parse(CREATE_TARGET_SIG).unwrap();
+        let sig: &[pattern::Atom] = &pat;
+        let rvas = find_pattern_matches("create_target", sig, pe_image, false).unwrap();
+        assert!(rvas.len() >= 2);
+
+        println!("Testing CreateTarget sig compatibility for patch 7.30h/7.31");
+        let addr = current_handle.wrapping_add(rvas[0]);
+        let parent_731_ptr = parent_731 as *const u8;
+        assert!((parent_731_ptr..parent_731_ptr.wrapping_add(100)).contains(&addr));
+
+        println!("Testing CreateTarget sig compatibility for patch 7.30/7.31h");
+        let addr = current_handle.wrapping_add(rvas[1]);
+        let parent_731h_ptr = parent_731h as *const u8;
+        assert!((parent_731h_ptr..parent_731h_ptr.wrapping_add(100)).contains(&addr));
     }
 
     fn validate_detour(

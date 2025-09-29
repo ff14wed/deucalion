@@ -28,6 +28,8 @@ enum SigScanError {
     MatchNotFound { name: &'static str },
     #[error("The signature for {} matched something invalid", name)]
     InvalidMatch { name: &'static str },
+    #[error("Complex signature cases are not supported")]
+    ComplexSignatureCases {},
     #[error("Signature has no predetermined match length.")]
     BadSignature {},
 }
@@ -163,132 +165,154 @@ pub fn find_pattern_matches<'a, P: Pe<'a>>(
     Ok(addrs)
 }
 
+/// Returns the number of bytes that the case would match, and the index within
+/// the pattern after the case block.
+fn parse_pattern_case(
+    expected_branch_len: u8,
+    pat: &[pat::Atom],
+    mut idx: usize,
+) -> Result<(usize, usize)> {
+    let mut last_case_atoms = 0;
+    let mut num_bytes = 0;
+    let mut allow_case = false;
+    while let Some(atom) = pat.get(idx).cloned() {
+        idx += 1;
+        match atom {
+            pat::Atom::Byte(_) if last_case_atoms > 0 => num_bytes += 1,
+            pat::Atom::Byte(_) | pat::Atom::Nop => {}
+            pat::Atom::Break(break_len) => {
+                match pat.get(idx) {
+                    Some(pat::Atom::Case(_)) => allow_case = true,
+                    None => {
+                        // Unexpected end of pattern
+                        if break_len != 0 {
+                            return Err(SigScanError::BadSignature {}.into());
+                        }
+                        break;
+                    }
+                    _ => {
+                        // This is the last case branch
+                        last_case_atoms = break_len;
+                    }
+                }
+                continue;
+            }
+            pat::Atom::Case(branch_length) => {
+                // Nested cases are not allowed
+                // If any case has a the wrong branch length, fail
+                if !allow_case || branch_length != expected_branch_len {
+                    return Err(SigScanError::BadSignature {}.into());
+                }
+            }
+            // Other atoms are not allowed inside a simple case
+            _ => return Err(SigScanError::ComplexSignatureCases {}.into()),
+        }
+        allow_case = false;
+        if last_case_atoms > 0 {
+            last_case_atoms -= 1;
+            if last_case_atoms == 0 {
+                break;
+            }
+        }
+    }
+
+    Ok((num_bytes, idx))
+}
+
 /// Gets the length of memory that the pattern would match as well as a
 /// heuristic excerpt from the pattern to use with fast byte searching. Only a
 /// subset of the pattern syntax is supported.
+/// Returns the length of bytes that the pattern would match, the excerpt, and
+/// the offset of the excerpt within the bytes that the pattern would match.
 fn get_pat_len_and_excerpt(pat: &[pat::Atom]) -> Result<(usize, Vec<u8>, usize)> {
     let mut idx = 0;
-    let mut excerpt = Vec::<u8>::new();
-
     let mut pat_len: usize = 0;
-    let mut offset: usize = 0;
-
     let mut depth = 0;
+
+    let mut best_excerpt = Vec::<u8>::new();
+    let mut best_excerpt_offset = 0;
+    let mut excerpt = Vec::<u8>::new();
 
     let mut ext_range: usize = 0;
     const SKIP_VA: usize = mem::size_of::<Va>();
 
     while let Some(atom) = pat.get(idx).cloned() {
         idx += 1;
-        // If the excerpt isn't long enough before a jump or fuzzy section then
-        // clear it and look for another excerpt
-        match atom {
-            pat::Atom::Pop
-            | pat::Atom::Jump1
-            | pat::Atom::Jump4
-            | pat::Atom::Ptr
-            | pat::Atom::Push(_)
-            | pat::Atom::Skip(_)
-            | pat::Atom::Fuzzy(_) => {
-                if excerpt.len() >= 3 {
-                    break;
-                } else {
+        if depth == 0 {
+            match atom {
+                pat::Atom::Byte(_) => (),
+                pat::Atom::VTypeName | pat::Atom::Back(_) | pat::Atom::Many(_) => {
+                    return Err(SigScanError::BadSignature {}.into());
+                }
+                _ => {
+                    // If we found a better excerpt before a jump or fuzzy section,
+                    // save it. Otherwise, look for another excerpt.
+                    if excerpt.len() >= best_excerpt.len() {
+                        best_excerpt_offset = pat_len - excerpt.len();
+                        best_excerpt = excerpt.clone();
+                    }
                     excerpt.clear();
                 }
             }
-            _ => (),
+            match atom {
+                pat::Atom::Byte(pat_byte) => {
+                    pat_len += 1;
+                    excerpt.push(pat_byte);
+                }
+                pat::Atom::Push(skip) => {
+                    let skip = ext_range + skip as usize;
+                    let skip = if skip == 0 { SKIP_VA } else { skip };
+                    pat_len = pat_len.wrapping_add(skip);
+                    ext_range = 0;
+                }
+                pat::Atom::Skip(skip) => {
+                    let skip = ext_range + skip as usize;
+                    let skip = if skip == 0 { SKIP_VA } else { skip };
+                    pat_len = pat_len.wrapping_add(skip);
+                    ext_range = 0;
+                }
+                pat::Atom::ReadU8(_) | pat::Atom::ReadI8(_) => pat_len += 1,
+                pat::Atom::ReadU16(_) | pat::Atom::ReadI16(_) => pat_len += 2,
+                pat::Atom::ReadU32(_) | pat::Atom::ReadI32(_) => pat_len += 4,
+                pat::Atom::Ptr => pat_len += SKIP_VA,
+                pat::Atom::Case(expected_branch_len) => {
+                    let (len, new_idx) = parse_pattern_case(expected_branch_len, pat, idx)?;
+                    pat_len += len;
+                    idx = new_idx;
+                    continue; // Continue to next atom after case block
+                }
+                _ => {}
+            }
         }
         match atom {
-            pat::Atom::Byte(pat_byte) => {
-                if depth == 0 {
-                    pat_len += 1;
-
-                    excerpt.push(pat_byte);
-                    offset += 1;
-                }
-            }
-            pat::Atom::Push(skip) => {
-                if depth == 0 {
-                    let skip = ext_range + skip as usize;
-                    let skip = if skip == 0 { SKIP_VA } else { skip };
-                    pat_len = pat_len.wrapping_add(skip);
-                    offset = offset.wrapping_add(skip);
-                    ext_range = 0;
-                }
-                depth += 1;
-            }
-            pat::Atom::Pop => {
-                depth -= 1;
-            }
-            pat::Atom::Skip(skip) => {
-                if depth == 0 {
-                    let skip = ext_range + skip as usize;
-                    let skip = if skip == 0 { SKIP_VA } else { skip };
-                    pat_len = pat_len.wrapping_add(skip);
-                    offset = offset.wrapping_add(skip);
-                    ext_range = 0;
-                }
-            }
-            pat::Atom::Rangext(ext) => {
-                ext_range = ext as usize * 256;
-            }
-            pat::Atom::ReadU8(_) | pat::Atom::ReadI8(_) => {
-                if depth == 0 {
-                    offset += 1;
-                    pat_len += 1;
-                }
-            }
-            pat::Atom::ReadU16(_) | pat::Atom::ReadI16(_) => {
-                if depth == 0 {
-                    offset += 2;
-                    pat_len += 2;
-                }
-            }
-            pat::Atom::ReadU32(_) | pat::Atom::ReadI32(_) => {
-                if depth == 0 {
-                    offset += 4;
-                    pat_len += 4;
-                }
-            }
-            pat::Atom::Ptr => {
-                if depth == 0 {
-                    offset += SKIP_VA;
-                    pat_len += SKIP_VA;
-                }
-            }
-            pat::Atom::Jump1
-            | pat::Atom::Jump4
-            | pat::Atom::Fuzzy(_)
-            | pat::Atom::Save(_)
-            | pat::Atom::Pir(_)
-            | pat::Atom::Check(_)
-            | pat::Atom::Aligned(_)
-            | pat::Atom::Zero(_)
-            | pat::Atom::Nop => ( /* ignore */ ),
-
-            pat::Atom::VTypeName
-            | pat::Atom::Back(_)
-            | pat::Atom::Many(_)
-            | pat::Atom::Case(_)
-            | pat::Atom::Break(_) => return Err(SigScanError::BadSignature {}.into()),
+            pat::Atom::Push(_) => depth += 1,
+            pat::Atom::Pop => depth -= 1,
+            pat::Atom::Rangext(ext) => ext_range = ext as usize * 256,
+            _ => (),
         }
     }
-    let excerpt_len = excerpt.len();
-    Ok((pat_len, excerpt, offset - excerpt_len))
+    // Just use whatever bytes we have at the end if we didn't find a good one
+    if best_excerpt.is_empty() || excerpt.len() > best_excerpt.len() {
+        let offset = pat_len - excerpt.len();
+        return Ok((pat_len, excerpt, offset));
+    }
+    Ok((pat_len, best_excerpt, best_excerpt_offset))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const TEST_SIG: &[pat::Atom] = pat!("E8 $ { 48 39 0D ? FF FE $ { ' } } 8D 4B C4");
-    const BAD_SIG: &[pat::Atom] = pat!("E8 (01 02 | 03 04 05) 8D 4B C4");
+    const TEST_SIG: &[pat::Atom] = pat!("E8 $ { 48 39 0D ? FF FE $ { ' } } 8D 4B C4 ? ? ? 41 81");
+    const MULTIPLE_CASE_SIG: &[pat::Atom] = pat!("E8 (01 02 | 03 04 | 05 06 | 07 08) 8D 4B C4");
+    const VARIABLE_LENGTH_SIG: &[pat::Atom] = pat!("E8 (01 02 03 | 03 04 05 06 | 07 08) 8D 4B C4");
+    const NESTED_CASE_SIG: &[pat::Atom] = pat!("E8 (01 (02 | 03) | 04) 8D 4B C4");
 
     #[test]
     fn test_correct_pat_len_and_excerpt() {
         let (pat_len, excerpt, excerpt_offset) = get_pat_len_and_excerpt(TEST_SIG).unwrap();
 
-        assert_eq!(pat_len, 8);
+        assert_eq!(pat_len, 13);
         let expected_excerpt: Vec<u8> = vec![0x8D, 0x4B, 0xC4];
         assert_eq!(excerpt, expected_excerpt);
 
@@ -296,8 +320,27 @@ mod tests {
     }
 
     #[test]
-    fn test_incorrect_pat_len() {
-        if get_pat_len_and_excerpt(BAD_SIG).is_ok() {
+    fn test_multiple_case_pat() {
+        let (pat_len, excerpt, excerpt_offset) =
+            get_pat_len_and_excerpt(MULTIPLE_CASE_SIG).unwrap();
+
+        assert_eq!(pat_len, 6);
+        let expected_excerpt: Vec<u8> = vec![0x8D, 0x4B, 0xC4];
+        assert_eq!(excerpt, expected_excerpt);
+
+        assert_eq!(excerpt_offset, 3)
+    }
+
+    #[test]
+    fn test_variable_length_pat() {
+        if get_pat_len_and_excerpt(VARIABLE_LENGTH_SIG).is_ok() {
+            panic!("Bad sig should return error");
+        }
+    }
+
+    #[test]
+    fn test_nested_case_pat() {
+        if get_pat_len_and_excerpt(NESTED_CASE_SIG).is_ok() {
             panic!("Bad sig should return error");
         }
     }
