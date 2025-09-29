@@ -5,13 +5,13 @@ use std::{
     arch::asm,
     mem,
     sync::{
-        Arc, LazyLock,
-        atomic::{AtomicPtr, AtomicUsize, Ordering},
+        LazyLock, OnceLock,
+        atomic::{AtomicPtr, Ordering},
     },
 };
 
 use anyhow::{Result, format_err};
-use log::{error, warn};
+use log::{debug, error, warn};
 use retour::RawDetour;
 use tokio::sync::mpsc;
 
@@ -20,7 +20,15 @@ use super::{
     packet::{self, DEUCALION_DEFER_IPC},
     waitgroup,
 };
-use crate::{procloader::get_ffxiv_handle, rpc};
+use crate::{hook::mov_disasm, procloader::get_ffxiv_handle, rpc};
+
+/// Constants initialized once during hook setup
+#[derive(Debug, Clone)]
+struct HookConstants {
+    parent_ptr: usize,
+    packet_reg: usize,
+    original_reg: usize,
+}
 
 // Once initialized, it's important to keep this in memory so that any
 // stray calls to the hook still have a valid trampoline to call.
@@ -28,6 +36,11 @@ static DETOUR: LazyLock<CustomDetour> = LazyLock::new(CustomDetour::new);
 
 /// Non-volatile registers that need to be preserved across the detour call.
 type Nonvolatiles = [usize; 7];
+
+/// Overriding with a custom signature for create_target is not supported. If
+/// this has changed, it is likely that the hook is broken in a way that just
+/// a signature change won't fix.
+pub const CREATE_TARGET_SIG: &str = "E8 ${ ' } 41 83 ? ? (48 | 49 | 4C | 4D) (89 | 8B) ? 41 81";
 
 /// Custom static detour designed specifically for CreateTarget. If the
 /// signature of the function being hooked changes non-trivially this will
@@ -217,7 +230,7 @@ pub struct Hook {
     data_tx: mpsc::UnboundedSender<rpc::Payload>,
     deobf_queue_rx: crossbeam_channel::Receiver<packet::Packet>,
     wg: waitgroup::WaitGroup,
-    parent_ptr: Arc<AtomicUsize>,
+    constants: OnceLock<HookConstants>,
 }
 
 impl Hook {
@@ -226,12 +239,7 @@ impl Hook {
         deobf_queue_rx: crossbeam_channel::Receiver<packet::Packet>,
         wg: waitgroup::WaitGroup,
     ) -> Result<Hook> {
-        Ok(Hook {
-            data_tx,
-            deobf_queue_rx,
-            wg,
-            parent_ptr: Arc::new(AtomicUsize::new(0)),
-        })
+        Ok(Hook { data_tx, deobf_queue_rx, wg, constants: OnceLock::new() })
     }
 
     pub fn setup(&self, parent_rva: usize, rvas: Vec<usize>) -> Result<()> {
@@ -240,9 +248,21 @@ impl Hook {
         }
         let ffxiv_handle = get_ffxiv_handle()?;
         let fn_ptr = ffxiv_handle.wrapping_add(rvas[0]);
-        let parent_ptr: usize = ffxiv_handle.wrapping_add(parent_rva) as usize;
-        self.parent_ptr
-            .compare_exchange(0, parent_ptr, Ordering::SeqCst, Ordering::SeqCst)
+        let parent_ptr = ffxiv_handle.wrapping_add(parent_rva);
+
+        let mov_bytes = unsafe { core::slice::from_raw_parts(parent_ptr.wrapping_add(9), 3) };
+        let (original_reg, packet_reg) = mov_disasm::disassemble_mov_instruction(mov_bytes)?;
+
+        debug!("Inferred registers: packet_reg={packet_reg:?}, original_reg={original_reg:?}");
+
+        let constants = HookConstants {
+            parent_ptr: parent_ptr as usize,
+            packet_reg: packet_reg as usize,
+            original_reg: original_reg as usize,
+        };
+
+        self.constants
+            .set(constants)
             .map_err(|_| format_err!("Could not initialize CreateTarget hook"))?;
 
         let self_clone = self.clone();
@@ -262,11 +282,19 @@ impl Hook {
         return_addr: usize,
         nonvolatile_regs: &Nonvolatiles,
     ) -> usize {
-        let packet_data = nonvolatile_regs[1]; // rdi
-        let original_data = nonvolatile_regs[3]; // r12
         let _guard = self.wg.add();
         let return_addr = return_addr as *const u8;
-        let parent_ptr = self.parent_ptr.load(Ordering::SeqCst) as *const u8;
+
+        let constants = match self.constants.get() {
+            Some(constants) => constants,
+            None => {
+                warn!("CreateTarget hook called before initialization. No data will be processed.");
+                return unsafe { DETOUR.call_original(source_actor, nonvolatile_regs) };
+            }
+        };
+        let parent_ptr = constants.parent_ptr as *const u8;
+        let packet_data = nonvolatile_regs[constants.packet_reg];
+        let original_data = nonvolatile_regs[constants.original_reg];
 
         // Ensure the return address is within the range of the packet dispatch
         // function
@@ -336,8 +364,7 @@ mod tests {
     use pelite::{pattern, pe::PeView};
 
     use crate::{
-        CREATE_TARGET_SIG,
-        hook::create_target::{DETOUR, Nonvolatiles},
+        hook::create_target::{CREATE_TARGET_SIG, DETOUR, Nonvolatiles},
         procloader::{find_pattern_matches, get_ffxiv_handle},
     };
 

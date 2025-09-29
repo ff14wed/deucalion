@@ -35,10 +35,7 @@ const COMMIT_DIRTY: &str = env!("VERGEN_GIT_DIRTY");
 pub const RECV_SIG: &str = "E8 $ { ' } 4C 8B 4F 10 8B 47 1C 45";
 pub const SEND_SIG: &str = "40 53 56 48 83 EC 38 48 8B D9 48 8B F2 8B";
 pub const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
-/// Overriding with a custom signature for create_target is not supported. If
-/// this has changed, it is likely that the hook is broken in a way that just
-/// a signature change won't fix.
-pub const CREATE_TARGET_SIG: &str = "E8 ${ ' } 41 83 ? ? (48 | 49 | 4C | 4D) (89 | 8B) ? 41 81";
+pub use hook::CREATE_TARGET_SIG;
 
 fn handle_payload(payload: rpc::Payload, hs: Arc<hook::State>) -> Result<()> {
     let hook_type = match payload.op {

@@ -13,11 +13,14 @@ use crate::{
 };
 
 mod create_target;
+mod mov_disasm;
 mod packet;
 mod recv;
 mod send;
 mod send_lobby;
 mod waitgroup;
+
+pub use create_target::CREATE_TARGET_SIG;
 
 pub struct State {
     recv_hook: recv::Hook,
