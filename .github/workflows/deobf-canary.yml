@@ -27,9 +27,9 @@ jobs:
     - name: Test
       shell: bash
       run: |
-        if grep "# Ensure rdi" "target/release/deps/deucalion.s" -B 20 \
-         | grep ".seh_endprologue" -A 10 \
-         | grep -Eq "movq.*, %(rdi|r12)$"; then
-          echo "Something found using rdi or r12 as a destination register"
+        if grep "# Ensure non-volatile" "target/release/deps/deucalion.s" -B 20 \
+         | grep ".seh_endprologue" -A 20 \
+         | grep -Eq "mov.*, %(rbx|rdi|rsi|r12|r13|r14|r15)$"; then
+          echo "Non-volatile register is clobbered before it can be saved."
           exit 1
         fi
