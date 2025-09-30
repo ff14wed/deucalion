@@ -366,7 +366,10 @@ mod tests {
     use pelite::{pattern, pe::PeView};
 
     use crate::{
-        hook::create_target::{CREATE_TARGET_SIG, DETOUR, Nonvolatiles},
+        hook::{
+            create_target::{CREATE_TARGET_SIG, DETOUR, Nonvolatiles},
+            mov_disasm::{Register, disassemble_mov_instruction},
+        },
         procloader::{find_pattern_matches, get_ffxiv_handle},
     };
 
@@ -585,10 +588,22 @@ mod tests {
         let parent_731_ptr = parent_731 as *const u8;
         assert!((parent_731_ptr..parent_731_ptr.wrapping_add(100)).contains(&addr));
 
+        println!("Testing if correct registers are extracted from 7.30h/7.31");
+        let mov_bytes = unsafe { core::slice::from_raw_parts(addr.wrapping_add(9), 3) };
+        let (original_reg, packet_reg) = disassemble_mov_instruction(mov_bytes).unwrap();
+        assert_eq!(original_reg, Register::R13);
+        assert_eq!(packet_reg, Register::Rdi);
+
         println!("Testing CreateTarget sig compatibility for patch 7.30/7.31h");
         let addr = current_handle.wrapping_add(rvas[1]);
         let parent_731h_ptr = parent_731h as *const u8;
         assert!((parent_731h_ptr..parent_731h_ptr.wrapping_add(100)).contains(&addr));
+
+        println!("Testing if correct registers are extracted from 7.30/7.31h");
+        let mov_bytes = unsafe { core::slice::from_raw_parts(addr.wrapping_add(9), 3) };
+        let (original_reg, packet_reg) = disassemble_mov_instruction(mov_bytes).unwrap();
+        assert_eq!(original_reg, Register::R12);
+        assert_eq!(packet_reg, Register::Rdi);
     }
 
     fn validate_detour(
