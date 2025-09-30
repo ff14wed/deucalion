@@ -131,6 +131,7 @@ impl CustomDetour {
             asm!(
                 "# Preserve all non-volatile registers before calling the trampoline",
                 "push rbx", "push rdi", "push rsi", "push r12", "push r13", "push r14", "push r15",
+                "sub rsp, 8",
                 "mov rbx, qword ptr [r10]",
                 "mov rdi, qword ptr [r10+8]",
                 "mov rsi, qword ptr [r10+16]",
@@ -139,6 +140,7 @@ impl CustomDetour {
                 "mov r14, qword ptr [r10+40]",
                 "mov r15, qword ptr [r10+48]",
                 "call rax",
+                "add rsp, 8",
                 "pop r15", "pop r14", "pop r13", "pop r12", "pop rsi", "pop rdi", "pop rbx",
                 in("rax") trampoline as usize,
                 in("rcx") source_actor,
@@ -525,6 +527,34 @@ mod tests {
         );
     }
 
+    /// Test function that checks if the stack is 16-byte aligned when called.
+    /// If this fails, it will either trigger the assert or cause a status
+    /// access violation
+    #[inline(never)]
+    fn stack_alignment_checker(mut source_actor: u32) -> u32 {
+        let stack_ptr: usize;
+        unsafe {
+            asm!("mov {}, rsp", out(reg) stack_ptr, inout("rcx") source_actor);
+        }
+        assert_eq!(stack_ptr % 16, 0, "DANGER: Misaligned stack pointer!");
+        source_actor
+    }
+
+    #[inline(never)]
+    unsafe extern "system" fn parent_stack_alignment() {
+        let dummy_result: u32;
+        unsafe {
+            asm!(
+                "mov ecx, {source_actor}",
+                "call {func}",
+                source_actor = const FAKE_SOURCE_ACTOR,
+                func = sym stack_alignment_checker,
+                out("rax") dummy_result,
+            );
+        }
+        assert_eq!(dummy_result, FAKE_SOURCE_ACTOR);
+    }
+
     #[test]
     fn test_parent_72x() {
         unsafe { parent_72x() };
@@ -600,5 +630,13 @@ mod tests {
             assert_eq!(nonvolatile_regs[1], FAKE_PACKET_PTR); // rdi
             assert_eq!(nonvolatile_regs[3], FAKE_ORIGINAL_PTR); // r12
         });
+
+        // Test stack alignment in trampoline calls
+        println!("Testing CreateTarget detour stack alignment");
+        validate_detour(
+            stack_alignment_checker,
+            parent_stack_alignment,
+            |_nonvolatile_regs| {},
+        );
     }
 }

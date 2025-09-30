@@ -5,8 +5,8 @@ use anyhow::{Result, bail};
 #[derive(Debug, PartialEq, Eq)]
 pub enum Register {
     Rbx = 0,
-    Rsi,
     Rdi,
+    Rsi,
     R12,
     R13,
     R14,
