@@ -1,14 +1,13 @@
 use std::{
     collections::HashMap,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     task::{Context, Poll},
 };
 
 use anyhow::{Error, Result, format_err};
 use futures::{SinkExt, Stream, StreamExt};
 use log::{error, info};
-use once_cell::sync::OnceCell;
 use stream_cancel::Tripwire;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -256,7 +255,7 @@ impl State {
 #[derive(Clone)]
 pub struct Server {
     state: Arc<Mutex<State>>,
-    shutdown_tx: OnceCell<mpsc::Sender<()>>,
+    shutdown_tx: OnceLock<mpsc::Sender<()>>,
 }
 
 impl Server {
@@ -270,7 +269,7 @@ impl Server {
                 send_lobby_hooked: false,
                 create_target_hooked: false,
             })),
-            shutdown_tx: OnceCell::new(),
+            shutdown_tx: OnceLock::new(),
         }
     }
 
@@ -865,10 +864,10 @@ mod tests {
         time::sleep(Duration::from_millis(100)).await;
 
         subscriber_handle.abort();
-        if let Err(e) = subscriber_handle.await {
-            if !e.is_cancelled() {
-                panic!("Test failed with assertion: {}", e);
-            }
+        if let Err(e) = subscriber_handle.await
+            && !e.is_cancelled()
+        {
+            panic!("Test failed with assertion: {}", e);
         }
 
         let num_received_val = num_received.load(Ordering::SeqCst);
@@ -981,10 +980,10 @@ mod tests {
         time::sleep(Duration::from_millis(100)).await;
 
         subscriber_handle.abort();
-        if let Err(e) = subscriber_handle.await {
-            if !e.is_cancelled() {
-                panic!("Test failed with assertion: {}", e);
-            }
+        if let Err(e) = subscriber_handle.await
+            && !e.is_cancelled()
+        {
+            panic!("Test failed with assertion: {}", e);
         }
 
         let num_received_val = num_received.load(Ordering::SeqCst);
