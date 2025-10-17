@@ -21,6 +21,7 @@ mod send_lobby;
 mod waitgroup;
 
 pub use create_target::CREATE_TARGET_SIG;
+pub use mov_disasm::disassemble_mov_instruction;
 
 pub struct State {
     recv_hook: recv::Hook,
