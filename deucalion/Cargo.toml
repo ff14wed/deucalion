@@ -1,6 +1,6 @@
 [package]
 name = "deucalion"
-version = "1.5.0"
+version = "1.5.1"
 authors = ["ff14wed"]
 edition = "2024"
 build = "build.rs"
