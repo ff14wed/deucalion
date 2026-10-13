@@ -32,7 +32,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const COMMIT_SHA: &str = env!("VERGEN_GIT_SHA");
 const COMMIT_DIRTY: &str = env!("VERGEN_GIT_DIRTY");
 
-pub const RECV_SIG: &str = "E8 $ { ' } 4C 8B 4F 10 8B 47 1C 45";
+pub const RECV_SIG: &str = "E8 $ { ' } 4C 8B 47 10 44 8B 4F 1C";
 pub const SEND_SIG: &str = "40 53 56 48 83 EC 38 48 8B D9 48 8B F2 8B";
 pub const SEND_LOBBY_SIG: &str = "40 53 48 83 EC 20 44 8B 41 28";
 pub use hook::infer_create_target_details;
