@@ -188,7 +188,7 @@ impl Subscriber {
             .set(shutdown_tx)
             .map_err(|_| format_err!("cannot run subscriber more than once"))?;
 
-        let subscriber = Retry::spawn(
+        let subscriber = Retry::start(
             ExponentialBackoff::from_millis(10).max_delay(Duration::from_secs(1)).take(8),
             || Endpoint::connect(pipe_name),
         )

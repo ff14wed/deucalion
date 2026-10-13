@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     info!("Injecting Deucalion into {pid}");
 
     if !payload_path.exists() {
-        return Err(format_err!("Payload {} not found!", &args.payload));
+        return Err(format_err!("Payload {} not found!", args.payload));
     }
 
     process::copy_current_process_dacl_to_target(pid)?;

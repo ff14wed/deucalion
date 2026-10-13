@@ -497,7 +497,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use ntest::{assert_false, assert_true, timeout};
-    use rand::Rng;
+    use rand::RngExt;
     use tokio::{select, task::JoinHandle};
 
     use super::*;

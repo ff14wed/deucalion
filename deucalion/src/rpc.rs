@@ -94,7 +94,8 @@ impl Encoder<Payload> for PayloadCodec {
     type Error = io::Error;
 
     fn encode(&mut self, data: Payload, dst: &mut BytesMut) -> Result<(), io::Error> {
-        self.ld_codec.encode(data.into(), dst)
+        let data: Bytes = data.into();
+        self.ld_codec.encode(data, dst)
     }
 }
 

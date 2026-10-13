@@ -6,26 +6,25 @@ authors = ["ff14wed"]
 edition = "2021"
 license = "GPL-3.0"
 description = "An implementation of a Deucalion client."
-homepage = "https://github.com/ff14wed/deucalion"
 repository = "https://github.com/ff14wed/deucalion"
 readme = "README.md"
 keywords = ["ffxiv", "windows", "dll-injection", "dll"]
 
 [dependencies]
-dll-syringe = "0.17"
+dll-syringe = "0.18"
 deucalion = { path = "../deucalion" }
-tokio = { version = "1.47.1", features = ["io-util", "sync", "rt"] }
-tokio-util = { version = "0.7.16", features = ["codec", "compat"] }
-tokio-retry = "0.3"
+tokio = { version = "1.53", features = ["io-util", "sync", "rt"] }
+tokio-util = { version = "0.7", features = ["codec", "compat"] }
+tokio-retry = "0.3.2"
 futures = "0.3"
-sysinfo = "0.37"
+sysinfo = "0.39"
 winapi = { version = "0.3", features = [
     "aclapi",
     "processthreadsapi",
     "securitybaseapi",
 ] }
-anyhow = "1.0"
+anyhow = "1"
 log = "0.4"
 simplelog = "0.12"
-clap = { version = "4.5", features = ["derive"] }
-binary-layout = "4.0"
+clap = { version = "4", features = ["derive"] }
+binary-layout = "4"

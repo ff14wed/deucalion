@@ -287,11 +287,7 @@ impl Hook {
 
         debug!("Inferred registers: packet_reg={packet_reg:?}, original_reg={original_reg:?}");
 
-        let constants = HookConstants {
-            parent_ptr,
-            packet_reg,
-            original_reg,
-        };
+        let constants = HookConstants { parent_ptr, packet_reg, original_reg };
 
         self.constants
             .set(constants)
